@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Go Structs & Pointers — June 2026</title>
+<link rel="stylesheet" href="../../assets/main.css" />
+<style>
+  .topic-hero { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-card)) 0%, var(--bg-card) 60%); border:1px solid var(--border-strong); border-radius:var(--radius-lg); padding:32px 28px; margin-bottom:24px; }
+  .topic-hero .meta { font-family:"JetBrains Mono",monospace; font-size:12px; letter-spacing:0.18em; color:var(--accent); text-transform:uppercase; }
+  .topic-hero h1 { margin:8px 0 8px; font-family:"Inter",sans-serif; font-size:34px; }
+  .topic-hero p  { margin:0; color:var(--fg-muted); font-size:17px; max-width:60ch; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:14px; margin:24px 0; }
+  .card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; transition:border-color 120ms, transform 120ms; }
+  .card:hover { border-color:var(--accent); transform: translateY(-2px); }
+  .card a { color:inherit; border:none; }
+  .card .num { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.15em; color:var(--accent); text-transform:uppercase; }
+  .card h3 { margin:6px 0 8px; font-family:"Inter",sans-serif; font-size:18px; }
+  .card p { margin:0; color:var(--fg-muted); font-size:14.5px; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="topic-hero">
+  <div class="meta">Topic · June 2026</div>
+  <h1>Go Structs & Pointers</h1>
+  <p>Four short lessons that build a working mental model: how structs
+  live in memory, why pointers exist for them, how methods mutate
+  through receivers, and how embedding composes new types out of
+  old ones.</p>
+</div>
+
+<h2>Lessons</h2>
+<div class="grid">
+  <div class="card">
+    <a href="01-what-is-a-struct.html">
+      <div class="num">L1 · Foundations</div>
+      <h3>What is a Struct?</h3>
+      <p>Definition, fields, literals, and what the stack looks like when
+      you instantiate one.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="02-pointers-to-structs.html">
+      <div class="num">L2 · Pointers</div>
+      <h3>Pointers to Structs</h3>
+      <p><code>&amp;</code>, <code>*</code>, <code>new</code>, auto-deref, the
+      nil trap, and the heap.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="03-methods-and-receivers.html">
+      <div class="num">L3 · Methods</div>
+      <h3>Value vs Pointer Receivers</h3>
+      <p>When methods mutate, the method-set rule, and the consistency
+      rule of thumb.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="04-embedding-and-composition.html">
+      <div class="num">L4 · Composition</div>
+      <h3>Embedding & Promotion</h3>
+      <p>Field promotion, method promotion, and embedding interfaces.</p>
+    </a>
+  </div>
+</div>
+
+<h2>Reference</h2>
+<p>
+  <a href="cheatsheet.md">Cheat sheet (markdown)</a> — the
+  compressed essence, designed to be reviewed, not read.
+</p>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="../../index.html">⌂ All topics</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Start at L1 →</strong>
+    <a href="01-what-is-a-struct.html">01-what-is-a-struct.html</a>
+  </div>
+</footer>
+
+</main>
+</body>
+</html>
