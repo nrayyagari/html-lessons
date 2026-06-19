@@ -9,7 +9,9 @@
   .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap:16px; margin:32px 0; }
   .card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:22px 24px; transition:border-color 120ms, transform 120ms; }
   .card:hover { border-color:var(--accent); transform: translateY(-2px); }
-  .card a { color:inherit; border:none; display:block; }
+  .card h3 a { color:inherit; border:none; }
+  .card h3 a:hover { color:var(--accent); }
+  .card .more { display:inline-block; margin-top:10px; font-size:13px; color:var(--accent); }
   .card .date { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.15em; color:var(--accent); text-transform:uppercase; }
   .card h3 { margin:8px 0 6px; font-family:"Inter",sans-serif; font-size:20px; }
   .card p  { margin:0 0 12px; color:var(--fg-muted); font-size:14.5px; }
@@ -37,24 +39,24 @@
 
 <div class="grid">
   <div class="card">
-    <a href="topics/19th-june-go-structs-and-pointers/">
-      <div class="date">June 2026</div>
-      <h3>Go Structs & Pointers</h3>
-      <p>How structs live in memory, why pointers exist for them, and
-      how methods mutate through receivers.</p>
-      <ul>
-        <li><a href="topics/19th-june-go-structs-and-pointers/01-what-is-a-struct.html">L1 — What is a Struct?</a></li>
-        <li><a href="topics/19th-june-go-structs-and-pointers/02-pointers-to-structs.html">L2 — Pointers to Structs</a></li>
-        <li><a href="topics/19th-june-go-structs-and-pointers/03-methods-and-receivers.html">L3 — Methods & Receivers</a></li>
-        <li><a href="topics/19th-june-go-structs-and-pointers/04-embedding-and-composition.html">L4 — Embedding & Composition</a></li>
-      </ul>
-    </a>
+    <div class="date">19 June 2026</div>
+    <h3><a href="topics/19th-june-go-structs-and-pointers/">Go Structs & Pointers</a></h3>
+    <p>How structs live in memory, why pointers exist for them, and
+    how methods mutate through receivers.</p>
+    <ul>
+      <li><a href="topics/19th-june-go-structs-and-pointers/01-what-is-a-struct.html">L1 — What is a Struct?</a></li>
+      <li><a href="topics/19th-june-go-structs-and-pointers/02-pointers-to-structs.html">L2 — Pointers to Structs</a></li>
+      <li><a href="topics/19th-june-go-structs-and-pointers/03-methods-and-receivers.html">L3 — Methods & Receivers</a></li>
+      <li><a href="topics/19th-june-go-structs-and-pointers/04-embedding-and-composition.html">L4 — Embedding & Composition</a></li>
+    </ul>
+    <a class="more" href="topics/19th-june-go-structs-and-pointers/">View topic overview →</a>
   </div>
 </div>
 
 <h2>How to add a new topic</h2>
 <ol>
-  <li>Create <code>topics/YYYY-MM-topic-name/</code>.</li>
+  <li>Create <code>topics/&lt;day&gt;&lt;ord&gt;-&lt;month&gt;-&lt;topic-name&gt;/</code>
+      (e.g. <code>topics/4th-july-gopointers/</code>).</li>
   <li>Write <code>01-...</code>, <code>02-...</code>, ... numbered lessons.</li>
   <li>Drop a topic landing <code>index.html</code> in the same folder.</li>
   <li>Add a card to the grid above.</li>
