@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kubernetes cert-manager — June 2026</title>
+<link rel="stylesheet" href="./assets/main.css" />
+<style>
+  .topic-hero { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-card)) 0%, var(--bg-card) 70%); border:1px solid var(--border); border-radius: var(--radius-xl); padding: 36px 32px; margin-bottom: 24px; position: relative; overflow: hidden; }
+  .topic-hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent); filter: blur(40px); }
+  .topic-hero .meta { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.18em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .topic-hero h1 { margin:8px 0 10px; font-family:"Inter",sans-serif; font-size:36px; letter-spacing: -0.015em; }
+  .topic-hero p  { margin:0; color:var(--fg-muted); font-size:18px; max-width:60ch; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap:16px; margin:24px 0; }
+  .card { background:var(--bg-card); border:1px solid var(--border); border-radius: var(--radius-lg); padding:20px 22px; transition: border-color 120ms, transform 120ms, box-shadow 120ms; box-shadow: var(--shadow-sm); }
+  .card:hover { border-color:var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+  .card a { color:inherit; border:none; }
+  .card .num { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.15em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .card h3 { margin:6px 0 8px; font-family:"Inter",sans-serif; font-size:18px; }
+  .card p { margin:0; color:var(--fg-muted); font-size:14.5px; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="topic-hero">
+  <div class="meta">Topic · 19 June 2026</div>
+  <h1>Kubernetes cert-manager</h1>
+  <p>One lesson on the model: the three CRDs, how the controller
+  reacts to a <code>Certificate</code>, the ACME challenge flow with
+  Let's Encrypt, and the gotchas that bite people in production.</p>
+</div>
+
+<h2>Lessons</h2>
+<div class="grid">
+  <div class="card">
+    <a href="01-cert-manager-basics.html">
+      <div class="num">L1 · The model</div>
+      <h3>cert-manager: who owns your TLS certs?</h3>
+      <p>Three CRDs, the controller loop, the ACME HTTP-01 challenge
+      flow, and the gotchas that show up in real clusters.</p>
+    </a>
+  </div>
+</div>
+
+<h2>Reference</h2>
+<p>
+  <a href="cheatsheet.md">Cheat sheet (markdown)</a> &mdash; Issuer
+  types, challenge types, the four debugging commands.
+</p>
+
+<h2>Primary source</h2>
+<p>
+  <a href="https://cert-manager.io/docs/">cert-manager.io/docs</a> is
+  the canonical reference &mdash; the concepts page in particular maps
+  cleanly to this lesson. For the deep dive on solvers, jump to
+  <a href="https://cert-manager.io/docs/configuration/acme/">Configuration / ACME</a>.
+</p>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="../../index.html">⌂ All topics</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Start at L1 →</strong>
+    <a href="01-cert-manager-basics.html">01-cert-manager-basics.html</a>
+  </div>
+</footer>
+
+</main>
+</body>
+</html>

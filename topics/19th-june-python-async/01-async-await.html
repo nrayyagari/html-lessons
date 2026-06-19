@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L1 · async/await — Python Async</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="../../index.html">⌂ All topics</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 1 of 2</span>
+  <a href="02-tasks-and-gather.html">Next: Tasks & gather →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 01 · Foundations</div>
+  <h1>async / await</h1>
+  <p class="lede">A coroutine is a function that can pause itself while it
+  waits for something. The event loop is what runs every coroutine in the
+  same thread, switching between them the moment one of them waits. That's
+  the whole idea.</p>
+</header>
+
+<p>Asyncio is Python's answer to a specific problem: <strong>your program
+spends most of its time waiting</strong> &mdash; for a database, for an HTTP
+response, for a disk read &mdash; and during that wait, the CPU has nothing
+to do. Threads can help, but they're expensive and racy. Coroutines
+cooperate: they pause themselves with <code>await</code> and let the loop
+run something else until the wait is over.</p>
+
+<div class="feature">
+<h3>The two things to internalize</h3>
+<ol>
+  <li><strong>One thread, many coroutines.</strong> There is no parallelism
+    here &mdash; no two coroutines execute Python at the same time. There
+    is <em>concurrency</em>: many are in flight, but only one is making
+    progress on the CPU at any given moment.</li>
+  <li><strong><code>await</code> is the only yield point.</strong> If a
+    coroutine never hits <code>await</code>, it hogs the loop. That's
+    the cooperative part &mdash; you have to play along.</li>
+</ol>
+</div>
+
+<h2>The minimum useful program</h2>
+
+<pre><span class="k">import</span> <span class="v">asyncio</span>
+
+<span class="k">async def</span> <span class="v">main</span>():
+    <span class="v">print</span>(<span class="s">"hello"</span>)
+    <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">sleep</span>(<span class="n">1</span>)
+    <span class="v">print</span>(<span class="s">"world"</span>)
+
+<span class="v">asyncio</span>.<span class="v">run</span>(<span class="v">main</span>())</pre>
+
+<p>Read it bottom-up:</p>
+<div class="steps">
+  <div class="step"><div class="body"><strong><code>asyncio.run(main())</code></strong><p>Creates a fresh event loop, runs <code>main()</code> to completion,
+    then tears the loop down. This is the only top-level entry point you
+    should ever call &mdash; never poke the loop yourself.</p></div></div>
+  <div class="step"><div class="body"><strong><code>async def main()</code></strong><p>Defines a <em>coroutine function</em>. Calling <code>main()</code> does
+    <strong>not run it</strong> &mdash; it returns a coroutine object, like
+    a promise. The loop runs the body only when the coroutine is awaited or
+    scheduled.</p></div></div>
+  <div class="step"><div class="body"><strong><code>await asyncio.sleep(1)</code></strong><p>Yields control back to the loop for 1 second. While this coroutine is
+    paused, the loop is free to run other coroutines. After 1s the loop
+    resumes us at the next line.</p></div></div>
+</div>
+
+<div class="callout">
+<strong>Calling a coroutine without <code>await</code> does nothing.</strong>
+<code>main()</code> returns a coroutine object, not a result. <code>asyncio.run</code>
+is what actually executes it. This is the single most common beginner mistake.
+</div>
+
+<h2>Sequential vs concurrent: the timing payoff</h2>
+
+<p>Consider two coroutines that each wait one second. Run them in
+sequence: <strong>2s total</strong>. Run them concurrently:
+<strong>1s total</strong>.</p>
+
+<div class="timeline">
+  <h4>Sequential — <code>await a; await b</code></h4>
+  <div class="track" style="--cols:2;">
+    <div class="seg io"  style="grid-column: 1 / 2;">A · sleep 1s</div>
+    <div class="seg io"  style="grid-column: 2 / 3;">B · sleep 1s</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot io"></span>coroutine waiting on I/O</span>
+  </div>
+  <p style="text-align:right; color:var(--fg-muted); font-size:13px; margin:8px 0 0;">elapsed: <strong>~2.0s</strong></p>
+</div>
+
+<div class="timeline">
+  <h4>Concurrent — <code>gather(a, b)</code></h4>
+  <div class="track" style="--cols:2;">
+    <div class="seg io"  style="grid-column: 1 / 2; animation-delay: 0ms;">A · sleep 1s</div>
+    <div class="seg io"  style="grid-column: 1 / 2; animation-delay: 0ms; margin-top:6px;">B · sleep 1s</div>
+  </div>
+  <p style="text-align:right; color:var(--fg-muted); font-size:13px; margin:8px 0 0;">elapsed: <strong>~1.0s</strong></p>
+  <p style="color:var(--fg-muted); font-size:14px; margin:4px 0 0;">Both A and B are scheduled together. The loop interleaves them on the same thread &mdash; while A is sleeping, B is also sleeping; while neither is runnable, the loop is idle.</p>
+</div>
+
+<p>The code for the concurrent version uses <code>asyncio.gather</code>,
+which lesson 2 covers in depth. For now, just notice the shape:</p>
+
+<pre><span class="k">import</span> <span class="v">asyncio</span>
+
+<span class="k">async def</span> <span class="v">slow</span>(label, secs):
+    <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">sleep</span>(secs)
+    <span class="k">return</span> <span class="s">f"</span><span class="x">{label}</span><span class="s"> done"</span>
+
+<span class="k">async def</span> <span class="v">main</span>():
+    <span class="c"># both sleep at the same time</span>
+    results = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(
+        <span class="v">slow</span>(<span class="s">"A"</span>, <span class="n">1</span>),
+        <span class="v">slow</span>(<span class="s">"B"</span>, <span class="n">1</span>),
+    )
+    <span class="v">print</span>(results)   <span class="c"># ['A done', 'B done']</span>
+
+<span class="v">asyncio</span>.<span class="v">run</span>(<span class="v">main</span>())</pre>
+
+<h2>When asyncio helps &mdash; and when it doesn't</h2>
+
+<div class="compare">
+  <div class="col good">
+    <div class="label">Use asyncio</div>
+    <h4>I/O-bound work</h4>
+    <p>The program is mostly waiting: HTTP, database, file I/O, message
+    queues, websockets. Each <code>await</code> is a chance for the loop
+    to make progress on something else.</p>
+  </div>
+  <div class="col bad">
+    <div class="label">Avoid asyncio</div>
+    <h4>CPU-bound work</h4>
+    <p>The program is computing: image processing, crypto, numerical
+    work, parsing. Asyncio adds overhead without any concurrency benefit
+    &mdash; you want <code>multiprocessing</code> (separate cores) or
+    native code via C extensions / numpy.</p>
+  </div>
+</div>
+
+<div class="callout warn">
+<strong>If you have one blocking call, you block the whole loop.</strong>
+A 5-second <code>time.sleep(5)</code> inside a coroutine freezes every
+other coroutine for 5 seconds. Use <code>await asyncio.sleep(5)</code>
+instead, or run the blocking call in a thread pool with
+<code>asyncio.to_thread</code> (covered in lesson 2).
+</div>
+
+<h2>The event loop in one paragraph</h2>
+
+<p>Picture a single-threaded todo list. The loop walks the list. For
+each ready coroutine, it runs it until the coroutine either finishes or
+hits an <code>await</code> on something that isn't ready. The not-ready
+ones go on a "wait until X" list &mdash; e.g. "wait until socket A has
+data" or "wait until timer B fires". The loop then runs other ready
+coroutines. When the OS reports that one of the waited-on things is
+ready, that coroutine goes back on the ready list. The loop keeps
+cycling until there's nothing left to do, at which point
+<code>asyncio.run</code> returns.</p>
+
+<div class="stat-row">
+  <div class="stat"><span class="num">1</span><span class="lbl">thread</span></div>
+  <div class="stat"><span class="num">N</span><span class="lbl">coroutines</span></div>
+  <div class="stat"><span class="num">1</span><span class="lbl">CPU core busy</span></div>
+  <div class="stat"><span class="num">0</span><span class="lbl">locks needed</span></div>
+</div>
+
+<p>The "0 locks" is the underrated win. Because only one coroutine runs
+at a time and they only switch at <code>await</code> points, most of the
+threading pain &mdash; race conditions, mutexes, deadlocks &mdash; simply
+doesn't apply. You give up true parallelism, but you buy back your
+sanity.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="b">
+  <p class="q">What does <code>main()</code> return when <code>async def main(): ...</code> is called?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="An async function doesn't return the result; it returns a coroutine object that produces the result when run.">the result of the function</button>
+    <button class="opt" data-value="b" data-why="Calling an async function returns a coroutine object. The body doesn't run until something awaits it or it's scheduled with create_task.">a coroutine object</button>
+    <button class="opt" data-value="c" data-why="It returns a coroutine, not a Task. Tasks are created by asyncio.create_task() or by running with asyncio.run / gather.">a Task</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You have two I/O-heavy coroutines, each taking 1s. What's the minimum elapsed time when run concurrently with <code>gather</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Both sleep on the same loop. While one waits, the other is also waiting — neither blocks the other.">~1 second</button>
+    <button class="opt" data-value="b" data-why="That's sequential timing. gather() schedules them together.">~2 seconds</button>
+    <button class="opt" data-value="c" data-why="asyncio.run adds a small fixed overhead for loop setup/teardown, not seconds.">~1 millisecond</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">Which kind of work is asyncio <em>not</em> a good fit for?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Async DB drivers are a textbook asyncio use case.">talking to a PostgreSQL database</button>
+    <button class="opt" data-value="b" data-why="Each fetch is mostly waiting on the network — gather them and you save real time.">fetching 100 URLs concurrently</button>
+    <button class="opt" data-value="c" data-why="Asyncio runs one coroutine at a time on a single thread. CPU work needs multiprocessing or native code, not asyncio.">computing SHA-256 of a 1 GB file</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-tasks-and-gather.html">Next: Tasks & gather →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask the agent: "what's the difference between a
+    coroutine, a Task, and a Future?", or "show me what the loop is doing
+    while a coroutine is awaiting".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

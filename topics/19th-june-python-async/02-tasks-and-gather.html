@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L2 · Tasks, gather, timeouts — Python Async</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="01-async-await.html">← async/await</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 2 of 2</span>
+  <a href="../../index.html">⌂ All topics</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 02 · Patterns</div>
+  <h1>Tasks, gather & timeouts</h1>
+  <p class="lede">Lesson 1 left you with <code>await</code> and a working
+  mental model. Now the real toolset: schedule coroutines to run
+  concurrently, gather their results, cancel what takes too long, and
+  push blocking code off the loop.</p>
+</header>
+
+<h2>Three ways to start a coroutine</h2>
+
+<p>You can think of these as "I want this to run &mdash; eventually". They
+differ in <em>when</em> the body starts and <em>whether</em> the caller
+waits for the result.</p>
+
+<table class="trace">
+  <tr><th>API</th><th>When body starts</th><th>Caller waits?</th><th>Returns</th></tr>
+  <tr><td><code>asyncio.run(coro())</code></td><td>immediately</td><td>yes, to completion</td><td>coro's return value</td></tr>
+  <tr><td><code>await coro</code></td><td>when awaited</td><td>yes, to completion</td><td>coro's return value</td></tr>
+  <tr class="highlight"><td><code>task = asyncio.create_task(coro)</code></td><td><strong>on the next loop tick</strong></td><td>no &mdash; caller keeps going</td><td>a <code>Task</code> you can await later</td></tr>
+</table>
+
+<p>The third one is the unlock. <code>create_task</code> schedules the
+coroutine to run as soon as the loop gets a chance, and gives you back a
+<code>Task</code> handle. You can keep going, schedule more, then
+<code>await</code> the task when you actually need its result.</p>
+
+<pre><span class="k">async def</span> <span class="v">main</span>():
+    t1 = <span class="v">asyncio</span>.<span class="v">create_task</span>(<span class="v">slow</span>(<span class="s">"A"</span>, <span class="n">1</span>))
+    t2 = <span class="v">asyncio</span>.<span class="v">create_task</span>(<span class="v">slow</span>(<span class="s">"B"</span>, <span class="n">1</span>))
+
+    <span class="c"># do other work here while A and B run in the background…</span>
+
+    r1 = <span class="k">await</span> t1   <span class="c"># join point 1</span>
+    r2 = <span class="k">await</span> t2   <span class="c"># join point 2 — but B is already done by now</span>
+    <span class="v">print</span>(r1, r2)</pre>
+
+<p>This is "fire and join" &mdash; you kick off both coroutines, do
+whatever else you need to do, then collect the results. If the work in
+the middle is non-trivial, you save real time.</p>
+
+<div class="callout">
+<strong><code>gather</code> is the shortcut.</strong> The pattern above
+&mdash; create all the tasks, then await each one &mdash; is exactly what
+<code>asyncio.gather(*coros)</code> does in one line, returning the
+results in input order.
+</div>
+
+<h2><code>gather</code> in detail</h2>
+
+<pre>results = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(
+    <span class="v">fetch</span>(url1),
+    <span class="v">fetch</span>(url2),
+    <span class="v">fetch</span>(url3),
+)
+<span class="c"># results == [r1, r2, r3] in order; raises on first failure</span></pre>
+
+<p>Two behaviors people get wrong:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>Order is preserved, not scheduling</strong><p>If you pass <code>[A, B, C]</code> to <code>gather</code>, the result
+    list is <code>[A's result, B's result, C's result]</code> in that order
+    &mdash; regardless of which one finishes first. Useful when order
+    matters; wasteful when you only need the first or any.</p></div></div>
+  <div class="step"><div class="body"><strong>The first failure cancels the rest</strong><p>If <code>A</code> raises an exception, <code>gather</code> cancels
+    <code>B</code> and <code>C</code>, then re-raises A's exception. If you
+    want all coroutines to run to completion and inspect failures
+    individually, pass <code>return_exceptions=True</code>.</p></div></div>
+</div>
+
+<pre><span class="c"># gather with return_exceptions: never raises; results include Exception objects</span>
+results = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(
+    <span class="v">fetch</span>(url1),
+    <span class="v">fetch</span>(url2),
+    <span class="k">return_exceptions</span>=<span class="k">True</span>,
+)
+<span class="k">for</span> url, r <span class="k">in</span> <span class="v">zip</span>(urls, results):
+    <span class="k">if</span> <span class="v">isinstance</span>(r, <span class="t">Exception</span>):
+        <span class="v">log</span>(<span class="s">f"</span><span class="x">{url}</span><span class="s"> failed: </span><span class="x">{r}</span><span class="s">"</span>)
+    <span class="k">else</span>:
+        <span class="v">process</span>(r)</pre>
+
+<h2>Timeouts: <code>wait_for</code></h2>
+
+<p>Real I/O has no upper bound. A "fetch" can hang forever, a database
+query can wait for a lock forever. You need a way to give up.</p>
+
+<pre><span class="k">try</span>:
+    result = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">wait_for</span>(<span class="v">fetch</span>(url), <span class="n">timeout</span>=<span class="n">2.0</span>)
+<span class="k">except</span> <span class="t">TimeoutError</span>:
+    <span class="v">log</span>(<span class="s">f"</span><span class="x">{url}</span><span class="s"> took too long"</span>)</pre>
+
+<p>What <code>wait_for</code> actually does: it races the coroutine
+against a timer. If the timer wins, the coroutine is <strong>cancelled</strong>
+&mdash; a <code>CancelledError</code> is raised inside it at the next
+<code>await</code>, and <code>wait_for</code> re-raises
+<code>asyncio.TimeoutError</code> to the caller. Cancellation is the
+mechanism; timeout is the reason.</p>
+
+<div class="callout warn">
+<strong>Cancellation can be lost.</strong> If the coroutine catches
+<code>CancelledError</code> and doesn't re-raise it, the task keeps
+running in the background &mdash; you've leaked it. Always re-raise
+unless you have a good reason, and <code>finally</code> blocks for
+cleanup.
+</div>
+
+<h2>Offloading blocking code: <code>to_thread</code></h2>
+
+<p>You will inevitably need to call a blocking library from inside an
+async program: a sync DB driver, a CPU-heavy computation, a file read.
+Calling it directly blocks the loop. The fix is to run it in a
+thread:</p>
+
+<pre><span class="c"># Python 3.9+</span>
+data = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">to_thread</span>(<span class="v">sync_db_query</span>, <span class="s">"SELECT …"</span>)
+
+<span class="c"># pre-3.9 equivalent</span>
+data = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">get_event_loop</span>().<span class="v">run_in_executor</span>(
+    <span class="k">None</span>, <span class="v">sync_db_query</span>, <span class="s">"SELECT …"</span>
+)</pre>
+
+<p><code>to_thread</code> hands the callable to the default
+<code>ThreadPoolExecutor</code>, runs it on a worker thread, and
+<code>await</code>s its return value. The loop stays responsive the
+whole time. For heavier CPU work, prefer
+<code>ProcessPoolExecutor</code> so you actually use multiple cores.</p>
+
+<h2>A realistic example: concurrent HTTP fetches with deadlines</h2>
+
+<pre><span class="k">import</span> <span class="v">asyncio</span>
+<span class="k">import</span> <span class="v">httpx</span>            <span class="c"># pip install httpx</span>
+
+<span class="k">async def</span> <span class="v">fetch_one</span>(client, url):
+    r = <span class="k">await</span> client.<span class="v">get</span>(url, <span class="n">timeout</span>=<span class="n">5.0</span>)
+    r.<span class="v">raise_for_status</span>()
+    <span class="k">return</span> url, <span class="v">len</span>(r.<span class="v">content</span>)
+
+<span class="k">async def</span> <span class="v">fetch_all</span>(urls):
+    <span class="k">async with</span> <span class="v">httpx</span>.<span class="v">AsyncClient</span>() <span class="k">as</span> client:
+        tasks = [<span class="v">asyncio</span>.<span class="v">create_task</span>(<span class="v">fetch_one</span>(client, u)) <span class="k">for</span> u <span class="k">in</span> urls]
+        <span class="c"># gather with return_exceptions so one bad URL doesn't kill the rest</span>
+        results = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(*tasks, <span class="k">return_exceptions</span>=<span class="k">True</span>)
+
+    <span class="k">for</span> u, r <span class="k">in</span> <span class="v">zip</span>(urls, results):
+        <span class="k">if</span> <span class="v">isinstance</span>(r, <span class="t">Exception</span>):
+            <span class="v">print</span>(<span class="s">f"</span><span class="x">{u}</span><span class="s">: </span><span class="x">{type</span>(r).<span class="x">__name__</span><span class="s">}</span><span class="s">: </span><span class="x">{r}</span><span class="s">"</span>)
+        <span class="k">else</span>:
+            url, size = r
+            <span class="v">print</span>(<span class="s">f"</span><span class="x">{url}</span><span class="s">: </span><span class="x">{size}</span><span class="s"> bytes"</span>)
+
+<span class="v">asyncio</span>.<span class="v">run</span>(<span class="v">fetch_all</span>([
+    <span class="s">"https://example.com/"</span>,
+    <span class="s">"https://example.org/"</span>,
+    <span class="s">"https://this-domain-does-not-exist.invalid/"</span>,
+]))</pre>
+
+<p>What this gets you for free:</p>
+<ul>
+  <li>All three requests fire at the same tick of the loop.</li>
+  <li>The bad URL fails fast; the other two still complete.</li>
+  <li>Per-request timeouts prevent one slow server from blocking the
+    whole batch.</li>
+  <li>Total elapsed time is roughly <em>max(latencies)</em>, not
+    <em>sum(latencies)</em>.</li>
+</ul>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="c">
+  <p class="q">What's the difference between <code>await coro</code> and <code>asyncio.create_task(coro)</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Both produce the same return value. The difference is timing, not result.">await returns the value; create_task returns None</button>
+    <button class="opt" data-value="b" data-why="Both are non-blocking; await just suspends the current coroutine until the inner one finishes.">create_task is blocking; await is non-blocking</button>
+    <button class="opt" data-value="c" data-why="create_task schedules the coroutine to start on the next loop tick and returns immediately, so the caller can do other work. await blocks the current coroutine until the inner one finishes.">create_task schedules it and returns a Task immediately; await blocks the caller until coro finishes</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">Inside <code>asyncio.gather(a, b, c)</code>, <code>a</code> raises. What happens to <code>b</code> and <code>c</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="gather cancels the remaining tasks on first failure and re-raises. To keep them running, pass return_exceptions=True.">They are cancelled, and gather re-raises a's exception</button>
+    <button class="opt" data-value="b" data-why="By default gather does cancel them. Only return_exceptions=True changes this.">They keep running; gather waits for all of them to finish</button>
+    <button class="opt" data-value="c" data-why="gather re-raises a's exception to the caller; the others' results are discarded.">They raise the same exception as a</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">You call a synchronous DB driver inside a coroutine. What goes wrong?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Sync calls don't fail; they just block. The issue is that during the block, no other coroutine can run.">The driver raises a TypeError because of the async context</button>
+    <button class="opt" data-value="b" data-why="A blocking call holds the single thread, so every other coroutine on the loop stalls for the duration. The fix is asyncio.to_thread.">The driver runs fine but freezes the event loop until it returns</button>
+    <button class="opt" data-value="c" data-why="There is no deadlock by default — only if you tried to call back into the loop from the sync code.">The event loop deadlocks waiting for itself</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="01-async-await.html">← async/await</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../../index.html">⌂ All topics</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "when would I use <code>asyncio.TaskGroup</code>
+    instead of <code>gather</code>?" or "show me how to run a coroutine
+    in parallel with a periodic background task".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

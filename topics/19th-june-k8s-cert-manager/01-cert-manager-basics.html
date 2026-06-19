@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L1 · cert-manager basics — Kubernetes cert-manager</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="../../index.html">⌂ All topics</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 1 of 1</span>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 01 · The model</div>
+  <h1>cert-manager: who owns your TLS certs?</h1>
+  <p class="lede">Three CRDs and a controller. You describe the certificate
+  you want; cert-manager makes it exist, renews it before expiry, and stores
+  the private key in a Secret. That's the whole shape.</p>
+</header>
+
+<p>TLS certificates expire. If you manage them by hand &mdash; buying
+from a CA, uploading to a Secret, restarting the Ingress &mdash; you
+will miss a renewal and your API will go dark at 03:00 on a Sunday.
+<strong>cert-manager</strong> is a Kubernetes controller that treats
+certificates as a declarative resource: you say <em>what</em>, the
+controller figures out <em>how</em> and <em>when</em>.</p>
+
+<div class="feature">
+<h3>The three resources you write</h3>
+<ol>
+  <li><code>Issuer</code> / <code>ClusterIssuer</code> &mdash; a named authority that can sign certs (Let's Encrypt, an internal CA, Vault).</li>
+  <li><code>Certificate</code> &mdash; the cert you actually want: which Issuer, which DNS names, which Secret to write to.</li>
+  <li>(<code>Secret</code>) &mdash; standard k8s object that cert-manager writes the key+cert into, ready for Ingress to mount.</li>
+</ol>
+<p style="margin:8px 0 0; color:var(--fg-muted); font-size:15.5px;">Everything else &mdash; ACME challenges, renewal, private key generation, rotation &mdash; is the controller's job.</p>
+</div>
+
+<h2>How the controller reacts to a Certificate</h2>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>You apply a <code>Certificate</code> manifest</strong><p>The controller sees a new resource. It inspects <code>spec.issuerRef</code>
+    to find which Issuer to use and <code>spec.dnsNames</code> to know
+    what to sign for.</p></div></div>
+  <div class="step"><div class="body"><strong>Self-check + private key generation</strong><p>If a matching <code>Secret</code> doesn't yet have a usable cert, the
+    controller generates an RSA / ECDSA private key locally &mdash; it
+    never leaves the cluster.</p></div></div>
+  <div class="step"><div class="body"><strong>Challenge (for ACME issuers)</strong><p>For a public CA like Let's Encrypt, the controller proves it
+    controls the domain: HTTP-01 (serve a token at
+    <code>http://&lt;domain&gt;/.well-known/acme-challenge/&lt;token&gt;</code>) or
+    DNS-01 (create a TXT record). Both can be solved automatically
+    with the right ingress / dns01 solver config.</p></div></div>
+  <div class="step"><div class="body"><strong>Certificate issued, written to the Secret</strong><p>The signed cert is base64-encoded and stored in
+    <code>Secret.data tls.crt</code> / <code>tls.key</code>, exactly where
+    Ingress / Gateway expects it.</p></div></div>
+  <div class="step"><div class="body"><strong>Renewal happens automatically</strong><p>cert-manager watches every cert it issued and renews ~30 days
+    before expiry. You don't have to do anything &mdash; the controller
+    runs the challenge flow again, gets a new cert, updates the Secret.</p></div></div>
+</div>
+
+<h2>The resource hierarchy at a glance</h2>
+
+<div class="hierarchy">
+  <div class="node kind-CRD">
+    <strong>Issuer / ClusterIssuer</strong>
+    <small>how to sign certs · account ref, server URL, solvers</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-resource">
+    <strong>Certificate</strong>
+    <small>what you want · dnsNames, duration, secretName</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-secret">
+    <strong>tls.crt / tls.key</strong>
+    <small>where it lands · a normal k8s Secret</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node" style="border-color: var(--heap);">
+      <strong>Ingress / Gateway</strong>
+      <small>reads the Secret</small>
+    </div>
+  </div>
+</div>
+
+<div class="callout">
+<strong>Issuer is namespaced. ClusterIssuer is not.</strong> Use a
+<code>ClusterIssuer</code> for certs you'll issue across many
+namespaces (the common case). Use a plain <code>Issuer</code> when
+you want to scope a single team's signing authority to their
+namespace.
+</div>
+
+<h2>A complete example: HTTPS for an Ingress, end to end</h2>
+
+<p>Assume cert-manager is already installed (one-line
+<code>kubectl apply</code> from
+<a href="https://cert-manager.io/docs/installation/">cert-manager.io/docs/installation</a>)
+and you have a <code>ClusterIssuer</code> named <code>letsencrypt-prod</code>.</p>
+
+<h3>1. The Issuer</h3>
+
+<pre><span class="c"># cluster-issuer.yaml</span>
+<span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: ClusterIssuer
+<span class="k">metadata</span>:
+  <span class="k">name</span>: letsencrypt-prod
+<span class="k">spec</span>:
+  <span class="k">acme</span>:
+    <span class="k">server</span>: <span class="s">https://acme-v02.api.letsencrypt.org/directory</span>
+    <span class="k">email</span>: ops@example.com
+    <span class="k">privateKeySecretRef</span>:
+      <span class="k">name</span>: letsencrypt-prod-account
+    <span class="k">solvers</span>:
+      <span class="c"># HTTP-01: prove domain control by serving a token over HTTP</span>
+      - <span class="k">http01</span>:
+          <span class="k">ingress</span>:
+            <span class="k">class</span>: nginx</pre>
+
+<h3>2. The Certificate</h3>
+
+<pre><span class="c"># cert.yaml</span>
+<span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: Certificate
+<span class="k">metadata</span>:
+  <span class="k">name</span>: api-example-com
+  <span class="k">namespace</span>: default
+<span class="k">spec</span>:
+  <span class="k">secretName</span>: api-example-com-tls   <span class="c"># the Secret that gets written</span>
+  <span class="k">issuerRef</span>:
+    <span class="k">name</span>: letsencrypt-prod
+    <span class="k">kind</span>: ClusterIssuer
+    <span class="k">group</span>: cert-manager.io
+  <span class="k">dnsNames</span>:
+    - api.example.com</pre>
+
+<h3>3. The Ingress that uses the Secret</h3>
+
+<pre><span class="k">apiVersion</span>: networking.k8s.io/v1
+<span class="k">kind</span>: Ingress
+<span class="k">metadata</span>:
+  <span class="k">name</span>: api
+  <span class="k">namespace</span>: default
+  <span class="k">annotations</span>:
+    <span class="c"># Optional shortcut: the cert-manager Ingress shim can create</span>
+    <span class="c"># the Certificate FOR you when this annotation is present.</span>
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+<span class="k">spec</span>:
+  <span class="k">ingressClassName</span>: nginx
+  <span class="k">tls</span>:
+    - <span class="k">hosts</span>: [api.example.com]
+      <span class="k">secretName</span>: api-example-com-tls
+  <span class="k">rules</span>:
+    - <span class="k">host</span>: api.example.com
+      <span class="k">http</span>:
+        <span class="k">paths</span>:
+          - <span class="k">path</span>: /
+            <span class="k">pathType</span>: Prefix
+            <span class="k">backend</span>:
+              <span class="k">service</span>:
+                <span class="k">name</span>: api
+                <span class="k">port</span>:
+                  <span class="k">number</span>: 8080</pre>
+
+<p>With the annotation on the Ingress, you don't even need the explicit
+<code>Certificate</code> manifest &mdash; the
+<a href="https://cert-manager.io/docs/usage/ingress/">ingress-shim</a>
+creates one for you, namespaced and matched to the
+<code>spec.tls[].secretName</code>. For most teams this is the only
+flow they use.</p>
+
+<h2>The ACME HTTP-01 challenge, in pictures</h2>
+
+<div class="hierarchy">
+  <div class="node kind-resource" style="border-color: var(--heap);">
+    <strong>1. You apply a Certificate for api.example.com</strong>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-CRD">
+    <strong>2. cert-manager asks Let's Encrypt for a challenge</strong>
+    <small>"prove you control api.example.com"</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-secret">
+    <strong>3. cert-manager creates a temporary Ingress route</strong>
+    <small>http://api.example.com/.well-known/acme-challenge/&lt;token&gt; → answers the challenge</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-resource">
+    <strong>4. Let's Encrypt hits the URL, verifies the token</strong>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-secret">
+    <strong>5. Let's Encrypt issues the cert; cert-manager stores it in the Secret</strong>
+  </div>
+  <div class="arrow"></div>
+  <div class="node" style="border-color: var(--good);">
+    <strong>6. ~60 days later: same flow runs again, transparently</strong>
+  </div>
+</div>
+
+<p>The whole dance usually takes under a minute. The only human input was
+the initial <code>kubectl apply</code>.</p>
+
+<h2>Common gotchas</h2>
+
+<div class="callout warn">
+<strong>Rate limits.</strong> Let's Encrypt has hard rate limits &mdash;
+50 certs per registered domain per week. Use the
+<code>staging</code> issuer (<code>acme-staging-v02.api.letsencrypt.org/directory</code>)
+for testing &mdash; it has much higher limits and intentionally issues
+untrusted certs, so you can iterate without burning your production
+quota.
+</div>
+
+<div class="callout warn">
+<strong>HTTP-01 needs port 80 reachable from the internet.</strong> If
+the cluster is firewalled or behind a private LB, HTTP-01 won't work.
+Either open port 80 or switch to DNS-01, which only needs the ability
+to create a TXT record on your DNS provider.
+</div>
+
+<div class="callout gold">
+<strong>Private CA = a different <code>Issuer</code> kind.</strong> For
+internal services you don't want on the public internet, point cert-manager
+at your internal CA (Vault, step-ca, CFSSL, even a shell-script
+CA). The resource shape is the same; only the Issuer's
+<code>spec.ca</code> / <code>spec.vault</code> block changes.
+</div>
+
+<div class="callout">
+<strong>Troubleshooting one-liner.</strong> <code>kubectl describe certificate
+api-example-com -n default</code> shows the current state and
+<em>events</em> with the failure reason (DNS not pointing here, solver
+config wrong, rate-limited, …). Follow with
+<code>kubectl describe challenge</code> and <code>kubectl describe order</code>
+for the ACME-level detail.
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="b">
+  <p class="q">A <code>Certificate</code> resource is namespaced, but the cert it produces is stored in a <code>Secret</code> in the same namespace. Which other resource type is cluster-scoped, and is the usual choice for an Issuer you want to share across namespaces?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Issuer is namespaced, not cluster-scoped. It's the per-namespace version of ClusterIssuer.">Issuer</button>
+    <button class="opt" data-value="b" data-why="ClusterIssuer is cluster-scoped, so its name is unique cluster-wide and can be referenced from any namespace's Certificate.">ClusterIssuer</button>
+    <button class="opt" data-value="c" data-why="ClusterSecret is not a real cert-manager resource.">ClusterSecret</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">Your cert for api.example.com is in a cluster where port 80 is firewalled off the internet. Which ACME challenge type will <em>not</em> work?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="DNS-01 only needs the ability to create a TXT record on the authoritative DNS — it does not need port 80.">DNS-01</button>
+    <button class="opt" data-value="b" data-why="cert-manager's Vault issuer can sign certs without any inbound network path.">Vault issuer (self-signed via internal PKI)</button>
+    <button class="opt" data-value="c" data-why="HTTP-01 requires Let's Encrypt to reach port 80 of your domain. If that's firewalled, the challenge never completes and the cert is never issued.">HTTP-01</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You added the <code>cert-manager.io/cluster-issuer: letsencrypt-prod</code> annotation to an Ingress, but no cert was issued. What's the right first step to debug?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="describe shows Events with the reason — wrong DNS, missing solver, rate limit, etc. — without having to guess.">kubectl describe ingress &lt;name&gt; and look for cert-manager events</button>
+    <button class="opt" data-value="b" data-why="Picking a different namespace won't help if the cert-manager controller hasn't seen the resource.">Recreate the Ingress in a different namespace</button>
+    <button class="opt" data-value="c" data-why="Forcing a renewal has no effect on an issue that's stuck before issuance.">kubectl certificate force-renew &lt;name&gt;</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../../index.html">⌂ All topics</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me the DNS-01 solver config for
+    Cloudflare / Route 53", or "how do I scope one team's Issuer to a
+    single namespace?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

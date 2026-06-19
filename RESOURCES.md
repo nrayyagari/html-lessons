@@ -17,3 +17,16 @@
 
 ## Books (deep)
 - *The Go Programming Language* — Alan Donovan & Brian Kernighan, ch. 4 (Composite Types) and ch. 6 (Methods).
+
+## Python asyncio (high trust)
+- https://docs.python.org/3/library/asyncio.html — the asyncio overview.
+- https://docs.python.org/3/library/asyncio-task.html — Tasks & coroutines (high-level API).
+- https://docs.python.org/3/library/asyncio-stream.html — streams for low-level I/O.
+- https://peps.python.org/pep-0492/ — the PEP that introduced `async`/`await` syntax.
+- *Fluent Python*, 2nd ed. — Luciano Ramalho, ch. 21 (Async) is the best book treatment.
+
+## Kubernetes cert-manager (high trust)
+- https://cert-manager.io/docs/ — canonical reference.
+- https://cert-manager.io/docs/concepts/ — Issuer / Certificate / Order / Challenge.
+- https://cert-manager.io/docs/usage/ingress/ — the Ingress shim that makes the common case annotation-only.
+- https://cert-manager.io/docs/configuration/acme/ — solver config (HTTP-01, DNS-01).

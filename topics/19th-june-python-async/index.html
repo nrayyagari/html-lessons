@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Python Async — June 2026</title>
+<link rel="stylesheet" href="./assets/main.css" />
+<style>
+  .topic-hero { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-card)) 0%, var(--bg-card) 70%); border:1px solid var(--border); border-radius: var(--radius-xl); padding: 36px 32px; margin-bottom: 24px; position: relative; overflow: hidden; }
+  .topic-hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent); filter: blur(40px); }
+  .topic-hero .meta { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.18em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .topic-hero h1 { margin:8px 0 10px; font-family:"Inter",sans-serif; font-size:36px; letter-spacing: -0.015em; }
+  .topic-hero p  { margin:0; color:var(--fg-muted); font-size:18px; max-width:60ch; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap:16px; margin:24px 0; }
+  .card { background:var(--bg-card); border:1px solid var(--border); border-radius: var(--radius-lg); padding:20px 22px; transition: border-color 120ms, transform 120ms, box-shadow 120ms; box-shadow: var(--shadow-sm); }
+  .card:hover { border-color:var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+  .card a { color:inherit; border:none; }
+  .card .num { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.15em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .card h3 { margin:6px 0 8px; font-family:"Inter",sans-serif; font-size:18px; }
+  .card p { margin:0; color:var(--fg-muted); font-size:14.5px; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="topic-hero">
+  <div class="meta">Topic · 19 June 2026</div>
+  <h1>Python Async</h1>
+  <p>Two short lessons that take you from "what is a coroutine" to
+  "concurrent HTTP fetches with timeouts and error isolation". The
+  mental model is the same throughout: one thread, many coroutines,
+  and <code>await</code> is the only place the loop gets a chance to
+  switch.</p>
+</div>
+
+<h2>Lessons</h2>
+<div class="grid">
+  <div class="card">
+    <a href="01-async-await.html">
+      <div class="num">L1 · Foundations</div>
+      <h3>async / await</h3>
+      <p>Coroutines, the event loop, and the sequential-vs-concurrent
+      timing payoff.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="02-tasks-and-gather.html">
+      <div class="num">L2 · Patterns</div>
+      <h3>Tasks, gather & timeouts</h3>
+      <p>create_task, gather with return_exceptions, wait_for for
+      deadlines, to_thread for blocking code.</p>
+    </a>
+  </div>
+</div>
+
+<h2>Reference</h2>
+<p>
+  <a href="cheatsheet.md">Cheat sheet (markdown)</a> &mdash; the
+  compressed essence: <code>async def</code>, <code>await</code>,
+  <code>gather</code>, <code>wait_for</code>, <code>to_thread</code>.
+</p>
+
+<h2>Primary source</h2>
+<p>
+  The official asyncio documentation is the canonical reference and is
+  unusually well-written. Start with
+  <a href="https://docs.python.org/3/library/asyncio.html">docs.python.org/3/library/asyncio.html</a>,
+  then read the
+  <a href="https://docs.python.org/3/library/asyncio-task.html">Tasks &amp; coroutines</a>
+  subpage for the high-level API.
+</p>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="../../index.html">⌂ All topics</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Start at L1 →</strong>
+    <a href="01-async-await.html">01-async-await.html</a>
+  </div>
+</footer>
+
+</main>
+</body>
+</html>
