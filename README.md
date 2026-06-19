@@ -9,12 +9,15 @@ GitHub Pages.
 ```
 .
 ├── index.html                            # all-topics directory
-├── assets/                               # shared stylesheet and widgets
+├── assets/                               # stylesheet & widgets for the root index only
 │   ├── main.css
 │   └── quiz.js
 ├── topics/
-│   └── 2026-06-go-structs-and-pointers/  # one folder per topic
+│   └── 2026-06-go-structs-and-pointers/  # one folder per topic — fully self-contained
 │       ├── index.html                    #   topic landing
+│       ├── assets/                       #   topic's own stylesheet & widgets
+│       │   ├── main.css
+│       │   └── quiz.js
 │       ├── 01-what-is-a-struct.html
 │       ├── 02-pointers-to-structs.html
 │       ├── 03-methods-and-receivers.html
@@ -26,6 +29,19 @@ GitHub Pages.
 └── RESOURCES.md                          # sources of truth
 ```
 
+## Isolation rule
+
+Every topic folder is **self-contained**. Its HTML, CSS, JS, cheatsheet,
+and learning record all live under that folder. This means:
+
+- A topic can be deleted, moved, or shared as a single unit.
+- A topic can diverge its visual treatment without affecting siblings
+  (e.g. a Python topic with syntax-highlighted code, a Rust topic with
+  borrow-checker diagrams).
+- No risk of asset-name collisions between topics.
+- The only thing NOT inside a topic is the root directory page
+  (`index.html` at the repo root), which keeps its own `assets/`.
+
 ## Naming convention
 
 - **Topic folder:** `YYYY-MM-<topic-name>` (kebab-case). The date is
@@ -33,6 +49,7 @@ GitHub Pages.
 - **Lesson file:** `NN-<short-name>.html` — two-digit number for
   ordering, dash-case name. The first lesson is `01-`.
 - **Topic landing:** `index.html` inside the topic folder.
+- **Topic assets:** `assets/` subfolder inside the topic folder.
 - **Cheat sheet:** `cheatsheet.md` inside the topic folder.
 - **Learning record:** `learning-record.md` inside the topic folder.
 
@@ -59,7 +76,7 @@ GitHub Pages deploys from `main` automatically; no build step.
 2. Drop a topic landing `index.html` (copy the pattern from an existing
    topic).
 3. Write lessons `01-…html`, `02-…html`, ... linking to
-   `../../assets/main.css`.
+   `./assets/main.css` (each topic owns its own assets).
 4. Add a card to the grid in the root `index.html`.
 5. Push to `main`. Pages redeploys in ~30s.
 
@@ -71,4 +88,6 @@ GitHub Pages deploys from `main` automatically; no build step.
   emerald = value, sky = accent.
 - Quizzes with fixed-length answer choices, no formatting clues.
 - Every lesson cites a primary source under `RESOURCES.md`.
-- Reuse `assets/main.css` — never inline styles in a lesson.
+- Reuse your topic's `./assets/main.css` — never inline styles in a lesson.
+  When a topic wants a different look, change that topic's CSS without
+  affecting any other topic.
