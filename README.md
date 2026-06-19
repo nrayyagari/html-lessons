@@ -13,7 +13,7 @@ GitHub Pages.
 │   ├── main.css
 │   └── quiz.js
 ├── topics/
-│   └── 2026-06-go-structs-and-pointers/  # one folder per topic — fully self-contained
+│   └── 19th-june-go-structs-and-pointers/  # one folder per topic — fully self-contained
 │       ├── index.html                    #   topic landing
 │       ├── assets/                       #   topic's own stylesheet & widgets
 │       │   ├── main.css
@@ -44,8 +44,9 @@ and learning record all live under that folder. This means:
 
 ## Naming convention
 
-- **Topic folder:** `YYYY-MM-<topic-name>` (kebab-case). The date is
-  the month the topic was started.
+- **Topic folder:** `<day><ord>-<month>-<topic-name>` (kebab-case).
+  Example: `19th-june-go-structs-and-pointers`, `4th-july-gopointers`.
+  The date is when the topic was started.
 - **Lesson file:** `NN-<short-name>.html` — two-digit number for
   ordering, dash-case name. The first lesson is `01-`.
 - **Topic landing:** `index.html` inside the topic folder.
@@ -65,14 +66,15 @@ The username comes from the repo owner. Specific lesson URLs follow the
 folder structure:
 
 ```
-https://nrayyagari.github.io/html-lessons/topics/2026-06-go-structs-and-pointers/01-what-is-a-struct.html
+https://nrayyagari.github.io/html-lessons/topics/19th-june-go-structs-and-pointers/01-what-is-a-struct.html
 ```
 
 GitHub Pages deploys from `main` automatically; no build step.
 
 ## Add a new topic
 
-1. `mkdir topics/YYYY-MM-topic-name`
+1. `mkdir topics/<day><ord>-<month>-<topic-name>` (e.g.
+   `topics/19th-june-go-structs-and-pointers`).
 2. Drop a topic landing `index.html` (copy the pattern from an existing
    topic).
 3. Write lessons `01-…html`, `02-…html`, ... linking to
