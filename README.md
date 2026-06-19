@@ -1,8 +1,8 @@
 # html-lessons
 
 A growing collection of visually-strong, self-contained HTML lessons on
-programming topics. One folder per topic, one file per lesson, hosted on
-GitHub Pages.
+programming topics. One folder per topic, one file per lesson, hosted
+on GitHub Pages.
 
 ## Structure
 
@@ -12,35 +12,53 @@ GitHub Pages.
 ├── assets/                               # stylesheet & widgets for the root index only
 │   ├── main.css
 │   └── quiz.js
+├── template/                             # starter files for a new topic
+│   ├── topic-index.html
+│   ├── cheatsheet.md
+│   └── learning-record.md
+├── bin/                                  # standardized workflow scripts
+│   ├── new-topic.sh                      #   bootstrap a new topic
+│   ├── serve.sh                          #   local http + cloudflare tunnel
+│   ├── publish.sh                        #   commit, push, verify Pages
+│   └── README.md                         #   script usage
 ├── topics/
-│   └── 19th-june-go-structs-and-pointers/  # one folder per topic — fully self-contained
-│       ├── index.html                    #   topic landing
-│       ├── assets/                       #   topic's own stylesheet & widgets
+│   └── <day><ord>-<month>-<topic>/       # one folder per topic — fully self-contained
+│       ├── index.html
+│       ├── assets/
 │       │   ├── main.css
 │       │   └── quiz.js
-│       ├── 01-what-is-a-struct.html
-│       ├── 02-pointers-to-structs.html
-│       ├── 03-methods-and-receivers.html
-│       ├── 04-embedding-and-composition.html
+│       ├── 01-…
+│       ├── 02-…
+│       ├── …
 │       ├── cheatsheet.md
 │       └── learning-record.md
-├── MISSION.md                            # why this collection exists
-├── NOTES.md                              # design preferences
-└── RESOURCES.md                          # sources of truth
+├── MISSION.md
+├── NOTES.md
+├── RESOURCES.md
+└── README.md
 ```
 
-## Isolation rule
+## Standardized workflow
 
-Every topic folder is **self-contained**. Its HTML, CSS, JS, cheatsheet,
-and learning record all live under that folder. This means:
+The `bin/` scripts are the canonical way to add a new topic. See
+[`bin/README.md`](bin/README.md) for full usage. The short version:
 
-- A topic can be deleted, moved, or shared as a single unit.
-- A topic can diverge its visual treatment without affecting siblings
-  (e.g. a Python topic with syntax-highlighted code, a Rust topic with
-  borrow-checker diagrams).
-- No risk of asset-name collisions between topics.
-- The only thing NOT inside a topic is the root directory page
-  (`index.html` at the repo root), which keeps its own `assets/`.
+```bash
+# 1. bootstrap a topic folder
+bin/new-topic.sh "Python asyncio"
+
+# 2. preview locally (optional)
+bin/serve.sh
+
+# 3. add a card to the root index.html (see bin/README.md for the shape)
+
+# 4. commit, push, verify Pages
+bin/publish.sh "Add Python asyncio topic"
+```
+
+The teach skill workflow drives the actual lesson content; these
+scripts handle the boilerplate, infra, and deployment so the agent can
+focus on writing.
 
 ## Naming convention
 
@@ -62,34 +80,18 @@ Hosted on GitHub Pages at:
 https://<username>.github.io/html-lessons/
 ```
 
-The username comes from the repo owner. Specific lesson URLs follow the
-folder structure:
+Specific lesson URLs follow the folder structure:
 
 ```
 https://nrayyagari.github.io/html-lessons/topics/19th-june-go-structs-and-pointers/01-what-is-a-struct.html
 ```
 
-GitHub Pages deploys from `main` automatically; no build step.
-
-## Add a new topic
-
-1. `mkdir topics/<day><ord>-<month>-<topic-name>` (e.g.
-   `topics/19th-june-go-structs-and-pointers`).
-2. Drop a topic landing `index.html` (copy the pattern from an existing
-   topic).
-3. Write lessons `01-…html`, `02-…html`, ... linking to
-   `./assets/main.css` (each topic owns its own assets).
-4. Add a card to the grid in the root `index.html`.
-5. Push to `main`. Pages redeploys in ~30s.
-
 ## Design rules
 
 - One tightly-scoped idea per lesson.
-- Tufte-inspired typography, dark background.
+- Light theme, Tufte-inspired typography.
 - Color tokens for memory: amber = stack, violet = heap, red = pointer,
   emerald = value, sky = accent.
 - Quizzes with fixed-length answer choices, no formatting clues.
 - Every lesson cites a primary source under `RESOURCES.md`.
-- Reuse your topic's `./assets/main.css` — never inline styles in a lesson.
-  When a topic wants a different look, change that topic's CSS without
-  affecting any other topic.
+- Reuse the topic's `./assets/main.css` — never inline styles in a lesson.

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{TOPIC_TITLE}} — {{DATE_DISPLAY}}</title>
+<link rel="stylesheet" href="./assets/main.css" />
+<style>
+  .topic-hero { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-card)) 0%, var(--bg-card) 70%); border:1px solid var(--border); border-radius: var(--radius-xl); padding: 36px 32px; margin-bottom: 24px; position: relative; overflow: hidden; }
+  .topic-hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent); filter: blur(40px); }
+  .topic-hero .meta { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.18em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .topic-hero h1 { margin:8px 0 10px; font-family:"Inter",sans-serif; font-size:36px; letter-spacing: -0.015em; }
+  .topic-hero p  { margin:0; color:var(--fg-muted); font-size:18px; max-width:60ch; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap:16px; margin:24px 0; }
+  .card { background:var(--bg-card); border:1px solid var(--border); border-radius: var(--radius-lg); padding:20px 22px; transition: border-color 120ms, transform 120ms, box-shadow 120ms; box-shadow: var(--shadow-sm); }
+  .card:hover { border-color:var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+  .card a { color:inherit; border:none; }
+  .card .num { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.15em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .card h3 { margin:6px 0 8px; font-family:"Inter",sans-serif; font-size:18px; }
+  .card p { margin:0; color:var(--fg-muted); font-size:14.5px; }
+  .empty { color: var(--fg-muted); font-style: italic; padding: 16px 0; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="topic-hero">
+  <div class="meta">Topic · {{DATE_DISPLAY}}</div>
+  <h1>{{TOPIC_TITLE}}</h1>
+  <p>{{TOPIC_DESCRIPTION}}</p>
+</div>
+
+<h2>Lessons</h2>
+<div class="grid">
+  <!-- Add lesson cards here. See bin/README.md for the card template. -->
+  <p class="empty">No lessons yet — add cards here as you write each lesson.</p>
+</div>
+
+<h2>Reference</h2>
+<p>
+  <a href="cheatsheet.md">Cheat sheet (markdown)</a> &mdash; the
+  compressed essence of the series.
+</p>
+
+<h2>Primary source</h2>
+<p>
+  Add the canonical doc / book / video the user should read for depth.
+</p>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="../../index.html">⌂ All topics</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Start at L1 →</strong> (add link after first lesson is written)
+  </div>
+</footer>
+
+</main>
+</body>
+</html>
