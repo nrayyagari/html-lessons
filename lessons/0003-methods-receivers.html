@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L3 · Methods & Receivers — Go Structs & Pointers</title>
+<link rel="stylesheet" href="../assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="0002-struct-pointers.html">← Pointers</a>
+  <span class="here">Lesson 3 of 4</span>
+  <a href="0004-embedding.html">Next: Embedding →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 03 · Methods</div>
+  <h1>Value vs Pointer Receivers</h1>
+  <p class="lede">A method is just a function with a receiver baked into
+  the call. Whether the receiver is <code>T</code> or <code>*T</code>
+  decides whether the call sees a copy or the original — and whether the
+  method is in <code>T</code>'s interface set, or only in <code>*T</code>'s.</p>
+</header>
+
+<pre><span class="k">type</span> <span class="t">Counter</span> <span class="k">struct</span> { <span class="v">n</span> <span class="t">int</span> }
+
+<span class="c">// value receiver — sees a copy</span>
+<span class="k">func</span> (c <span class="t">Counter</span>) <span class="v">Value</span>() <span class="t">int</span> { <span class="k">return</span> c.n }
+
+<span class="c">// pointer receiver — sees the original</span>
+<span class="k">func</span> (c <span class="o">*</span><span class="t">Counter</span>) <span class="v">Inc</span>() { c.n++ }</pre>
+
+<p>Calling these methods:</p>
+
+<pre>c := <span class="t">Counter</span>{<span class="v">n</span>: <span class="n">0</span>}
+c.Value()   <span class="c">// Counter.Value</span>
+c.Inc()     <span class="c">// Go rewrites to (&c).Inc() automatically</span>
+c.Value()   <span class="c">// 1</span></pre>
+
+<p>When the receiver is <code>*Counter</code>, Go takes the address of
+<code>c</code> for you — <em>provided <code>c</code> is addressable</em>.
+Local variables, slice elements, and struct fields are addressable; map
+values and the result of a function call are not.</p>
+
+<h2>Mutation: only the pointer receiver can</h2>
+
+<div class="mem-row">
+  <div class="col">
+    <h4>value receiver</h4>
+    <pre style="margin:0"><code>func (c Counter) Inc() {
+    c.n++    // mutates the COPY
+}
+
+main:
+  c := Counter{n:0}
+  c.Inc()        // copy of c goes in
+  c.n            // still 0</code></pre>
+  </div>
+  <div class="col">
+    <h4>pointer receiver</h4>
+    <pre style="margin:0"><code>func (c *Counter) Inc() {
+    c.n++    // mutates the real one
+}
+
+main:
+  c := Counter{n:0}
+  c.Inc()        // Go does (&c).Inc()
+  c.n            // 1</code></pre>
+  </div>
+</div>
+
+<p>This is the "go through the arrow" pattern from lesson 2, baked into
+the call syntax.</p>
+
+<h2>The "but it worked" trap with auto-addressing</h2>
+
+<p>A common surprise: this <em>does</em> compile, and <em>does</em>
+mutate:</p>
+
+<pre><span class="k">func</span> (c <span class="o">*</span><span class="t">Counter</span>) <span class="v">Reset</span>() { c.n = <span class="n">0</span> }
+
+<span class="k">var</span> c <span class="t">Counter</span>      <span class="c">// addressable local</span>
+c.Reset()            <span class="c">// OK: Go takes &c</span>
+
+<span class="c">// vs.</span>
+
+<span class="k">func</span> <span class="v">makeCounter</span>() <span class="t">Counter</span> { <span class="k">return</span> <span class="t">Counter</span>{} }
+makeCounter().Reset() <span class="c">// ERROR: cannot take address of makeCounter()</span></pre>
+
+<div class="callout warn">
+<strong>Addressability rule.</strong> You can call a pointer-receiver
+method on a value only if that value is addressable. The result of a
+function call is not addressable, so <code>foo().Bar()</code> works for
+value receivers only.
+</div>
+
+<h2>Method sets: the interface rule</h2>
+
+<p>The set of methods on a type is called its <strong>method set</strong>.
+It is the most common reason people hit "method has pointer receiver"
+interface errors.</p>
+
+<table class="trace">
+  <tr><th>Receiver</th><th>Method set of <code>T</code></th><th>Method set of <code>*T</code></th></tr>
+  <tr><td>value <code>T</code></td><td>includes it</td><td>includes it (Go auto-addresses)</td></tr>
+  <tr class="highlight"><td>pointer <code>*T</code></td><td><strong>excludes it</strong></td><td>includes it</td></tr>
+</table>
+
+<p>So if an interface demands a pointer-receiver method, only a
+<code>*T</code> can satisfy it. A value <code>T</code> cannot — even
+though the call <code>t.PointerMethod()</code> would work in isolation.</p>
+
+<pre><span class="k">type</span> <span class="t">Incr</span> <span class="k">interface</span> { <span class="v">Inc</span>() }
+<span class="k">var</span> _ <span class="t">Incr</span> = <span class="t">Counter</span>{}      <span class="c">// ✗ cannot use Counter (value) as Incr</span>
+                                <span class="c">//   Inc has pointer receiver</span>
+<span class="k">var</span> _ <span class="t">Incr</span> = &amp;<span class="t">Counter</span>{}      <span class="c">// ✓</span></pre>
+
+<h2>How to choose — the practical rule</h2>
+
+<p>The Go community's rule of thumb (from
+<a href="https://go.dev/wiki/CodeReviewComments#receiver-type">CodeReviewComments</a>):</p>
+
+<ol>
+  <li><strong>The method must mutate the receiver?</strong> Pointer.</li>
+  <li><strong>The receiver is large?</strong> Pointer — avoid the copy.</li>
+  <li><strong>The receiver contains a <code>sync.Mutex</code> or
+    similar?</strong> Pointer — copying the mutex is a bug.</li>
+  <li><strong>Any other method on the type uses a pointer
+    receiver?</strong> Use pointer receivers for <em>all</em> of them — for
+    consistency, and to keep the method sets compatible.</li>
+  <li>Otherwise, value receiver is fine.</li>
+</ol>
+
+<div class="callout gold">
+<strong>Consistency wins.</strong> A type with three pointer-receiver
+methods and one value-receiver method is a smell. The value one is
+probably a bug. Pick one and stick with it.
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="b">
+  <p class="q">A method has receiver <code>(c *Counter)</code>. Which call is <em>not</em> legal?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="c is addressable, so Go takes &c automatically.">c.Inc() where c is a local Counter</button>
+    <button class="opt" data-value="b" data-why="The result of a function call is not addressable, so you can't take & on it.">factory().Inc() where factory returns Counter</button>
+    <button class="opt" data-value="c" data-why="Slice elements are addressable.">s[0].Inc() where s is a []Counter</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">An interface has a pointer-receiver method. Can a value satisfy it?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="T's method set excludes *T-receiver methods. Only *T satisfies the interface.">No — the value's method set is missing that method</button>
+    <button class="opt" data-value="b" data-why="Go does auto-address for calls, but not for interface satisfaction.">Yes — Go auto-addresses for interface satisfaction too</button>
+    <button class="opt" data-value="c" data-why="Mixed receiver kinds are allowed in interfaces; the satisfaction check still cares about method sets.">Yes, but only if the interface has a mix of value and pointer methods</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">You have a 64-byte struct. It is read-mostly, never mutated. Best receiver?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Pointer would also work, but copying a 64-byte struct is cheap enough not to worry about.">Pointer — copying 64 bytes on every call is wasteful</button>
+    <button class="opt" data-value="b" data-why="There's no mutation need, so value is fine. 64 bytes is small by 2026 standards.">Value — there's no rule that says "pointer for large structs"</button>
+    <button class="opt" data-value="c" data-why="For a 64-byte, read-only struct, value is fine. The bar for "large enough to pointer" is higher than people think — and consistency matters more than this size.">Value — 64 bytes is small; value receiver is fine and keeps the method set on T</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="0002-struct-pointers.html">← Pointers</a>
+    <a href="0004-embedding.html">Next: Embedding →</a>
+    <a href="../reference/cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "what is the addressability of a struct
+    field?" or "show me the <code>go vet</code> warning for inconsistent
+    receivers".
+  </div>
+</footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L4 · Embedding — Go Structs & Pointers</title>
+<link rel="stylesheet" href="../assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="0003-methods-receivers.html">← Methods</a>
+  <span class="here">Lesson 4 of 4</span>
+  <a href="../index.html">⌂ Series</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 04 · Composition</div>
+  <h1>Embedding & Method Promotion</h1>
+  <p class="lede">Go's answer to inheritance: a struct with no field name
+  automatically exposes that type's fields and methods at the outer
+  level. There's no <code>extends</code> — just types living inside
+  types.</p>
+</header>
+
+<p>An <strong>embedded</strong> field is a field declared with a type but
+no name:</p>
+
+<pre><span class="k">type</span> <span class="t">Point</span> <span class="k">struct</span> { <span class="v">X</span>, <span class="v">Y</span> <span class="t">int</span> }
+<span class="k">func</span> (p <span class="o">*</span><span class="t">Point</span>) <span class="v">Move</span>(dx, dy <span class="t">int</span>) { p.X += dx; p.Y += dy }
+
+<span class="k">type</span> <span class="t">Sprite</span> <span class="k">struct</span> {
+    <span class="t">Point</span>          <span class="c">// ← embedded, no name</span>
+    <span class="v">Name</span> <span class="t">string</span>
+}</pre>
+
+<p>That single nameless field is enough to "promote" <code>Point.X</code>,
+<code>Point.Y</code>, and <code>(*Point).Move</code> up to
+<code>Sprite</code>:</p>
+
+<pre>s := <span class="t">Sprite</span>{<span class="v">Point</span>: <span class="t">Point</span>{<span class="v">X</span>: <span class="n">1</span>, <span class="v">Y</span>: <span class="n">2</span>}, <span class="v">Name</span>: <span class="s">"hero"</span>}
+fmt.Println(s.X, s.Y)   <span class="c">// 1 2 — promoted fields</span>
+s.Move(<span class="n">3</span>, <span class="n">4</span>)         <span class="c">// promoted method, s.Point.X is now 4</span>
+s.Point.Move(<span class="n">3</span>, <span class="n">4</span>)   <span class="c">// same thing, fully qualified</span></pre>
+
+<h2>Memory: the embedded struct is right there</h2>
+
+<p>Embedding is not a pointer indirection by default. The inner struct
+lives <em>inside</em> the outer one, in the order the fields were
+declared.</p>
+
+<div class="mem">
+  <div class="label stack">Stack · main</div>
+  <div class="box">
+    <div class="title">frame for main</div>
+    <div class="frame">
+      <span class="name">s</span> <span class="type">Sprite</span>
+      <div class="field"><span class="k">Point.X</span> <span class="v">= 1</span></div>
+      <div class="field"><span class="k">Point.Y</span> <span class="v">= 2</span></div>
+      <div class="field"><span class="k">Name</span>     <span class="v">= "hero"</span></div>
+    </div>
+  </div>
+</div>
+
+<p>The total size of <code>Sprite</code> is the size of <code>Point</code>
+plus the size of <code>string</code>, plus any padding. There is no
+hidden pointer to <code>Point</code>.</p>
+
+<h2>Embedding a pointer</h2>
+
+<p>You can embed <code>*Point</code> instead, and the same promotion
+happens — but now mutation through the promoted method is the only way to
+mutate, because the outer struct holds a pointer to a separately allocated
+inner one.</p>
+
+<pre><span class="k">type</span> <span class="t">Sprite</span> <span class="k">struct</span> {
+    <span class="o">*</span><span class="t">Point</span>          <span class="c">// embedded pointer</span>
+    <span class="v">Name</span> <span class="t">string</span>
+}
+
+s := &amp;<span class="t">Sprite</span>{<span class="v">Name</span>: <span class="s">"hero"</span>}    <span class="c">// s.Point is nil!</span>
+s.Move(<span class="n">1</span>, <span class="n">1</span>)                  <span class="c">// panic: nil pointer dereference</span>
+s.Point = &amp;<span class="t">Point</span>{}             <span class="c">// init first</span>
+s.Move(<span class="n">1</span>, <span class="n">1</span>)                  <span class="c">// OK now</span></pre>
+
+<div class="callout warn">
+<strong>Embedded pointer is a footgun.</strong> If you forget to initialize
+it, every promoted method call is a panic. The compiler can't help you.
+</div>
+
+<h2>Method promotion rules</h2>
+
+<p>Promotion is shallow, not transitive. If <code>Sprite</code> embeds
+<code>Point</code> and <code>Level</code> embeds <code>Sprite</code>,
+<code>Level</code> does <em>not</em> get <code>Point</code>'s methods
+directly — only through <code>Level.Sprite.Point</code>.</p>
+
+<table class="trace">
+  <tr><th>Embedded as</th><th>Method set on outer <code>T</code></th><th>Notes</th></tr>
+  <tr><td>value <code>Point</code></td><td>value-receiver methods of <code>Point</code></td><td>value-only</td></tr>
+  <tr><td>value <code>Point</code></td><td>pointer-receiver methods of <code>Point</code></td><td>via auto-addressing</td></tr>
+  <tr><td>pointer <code>*Point</code></td><td>value-receiver methods of <code>Point</code></td><td>auto-deref on call</td></tr>
+  <tr class="highlight"><td>pointer <code>*Point</code></td><td>pointer-receiver methods of <code>Point</code></td><td>direct</td></tr>
+</table>
+
+<p>Notice: <strong>value-embedded value</strong> is the only combination
+that <em>does not</em> get pointer-receiver methods of the inner type
+when the outer type is a value. The outer's method set only contains them
+if the outer is a pointer.</p>
+
+<h2>Composition over inheritance</h2>
+
+<p>The idiomatic shape of an embedding-heavy Go type:</p>
+
+<pre><span class="k">type</span> <span class="t">Reader</span> <span class="k">interface</span> { <span class="v">Read</span>(p []<span class="t">byte</span>) (<span class="t">int</span>, <span class="t">error</span>) }
+<span class="k">type</span> <span class="t">Logger</span> <span class="k">interface</span> { <span class="v">Logf</span>(<span class="t">string</span>, ...<span class="k">any</span>) }
+
+<span class="k">type</span> <span class="t">Service</span> <span class="k">struct</span> {
+    <span class="t">Reader</span>  <span class="c">// embed an interface — small, no allocation</span>
+    <span class="t">Logger</span>
+    <span class="v">Name</span> <span class="t">string</span>
+}
+
+<span class="c">// Service.Read delegates to the embedded Reader; same for Logf.</span>
+<span class="k">func</span> (s <span class="o">*</span><span class="t">Service</span>) <span class="v">Read</span>(p []<span class="t">byte</span>) (<span class="t">int</span>, <span class="t">error</span>) {
+    s.Logf(<span class="s">"read"</span>, s.Name)   <span class="c">// promoted method</span>
+    <span class="k">return</span> s.Reader.Read(p)  <span class="c">// delegated</span>
+}</pre>
+
+<p>Embedding an interface is a common pattern: a small field, zero bytes
+of state, full method promotion. <code>io.ReadWriter</code> in the
+standard library is the canonical example.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="c">
+  <p class="q">Why does <code>s.Move(1, 1)</code> panic when <code>Sprite</code> embeds <code>*Point</code> and <code>s.Point</code> is still nil?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Move is a real method — there's no missing method to look up.">The method Move does not exist on *Point</button>
+    <button class="opt" data-value="b" data-why="Promotion works; that's why s.Move compiles. The panic is later.">Go's method resolver can't find Move at compile time</button>
+    <button class="opt" data-value="c" data-why="s.Point is nil. (*Point).Move dereferences the receiver to mutate fields — nil deref panic.">Move has a pointer receiver; the receiver is nil</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">Sprite embeds value Point. From a value <code>Sprite</code> (not a pointer), which methods are reachable?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Value Sprite's method set includes Point's value methods plus its pointer methods (via auto-addressing). Both work.">Both (Point).Move value-receiver and (*Point).Move pointer-receiver</button>
+    <button class="opt" data-value="b" data-why="Pointer methods of Point are reachable on a value Sprite — Go takes &s.Point automatically.">Only the pointer-receiver method (*Point).Move</button>
+    <button class="opt" data-value="c" data-why="A value receiver is always available on the value of the same type.">Only the value-receiver method (Point).Move</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="0003-methods-receivers.html">← Methods</a>
+    <a href="../reference/cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../index.html">⌂ Series index</a>
+  </div>
+  <div class="ask">
+    <strong>Wrap up.</strong> Ask for a 10-question retrieval quiz on the
+    whole series, or request a personal practice problem ("write a counter
+    type that demonstrates both receivers and embedding").
+  </div>
+</footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

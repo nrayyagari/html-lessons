@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L1 · What is a Struct? — Go Structs & Pointers</title>
+<link rel="stylesheet" href="../assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="../index.html">⌂ Series</a>
+  <span class="here">Lesson 1 of 4</span>
+  <a href="0002-struct-pointers.html">Next: Pointers →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 01 · Foundations</div>
+  <h1>What is a Struct?</h1>
+  <p class="lede">A struct is a fixed-shape bundle of named fields, allocated
+  on the stack by default, and copied every time you pass it. Once you can
+  picture it in memory, the rest of Go gets easier.</p>
+</header>
+
+<p>A <strong>struct</strong> is a composite type: a recipe for a block of
+memory that holds a fixed set of named values, side by side. The size of
+that block is the sum of the sizes of its fields, plus any padding Go's
+allocator adds to keep fields aligned.</p>
+
+<pre><span class="k">type</span> <span class="t">User</span> <span class="k">struct</span> {
+    <span class="v">Name</span>   <span class="t">string</span>  <span class="c">// 16 bytes (header + ptr + len)</span>
+    <span class="v">Age</span>    <span class="t">int</span>     <span class="c">// 8 bytes</span>
+    <span class="v">Active</span> <span class="t">bool</span>    <span class="c">// 1 byte, then 7 bytes of padding</span>
+}</pre>
+
+<p>That definition is a <em>type</em>. It produces no value by itself — it's
+a shape, not a thing. To get a thing, you <em>instantiate</em> it.</p>
+
+<h2>Three ways to instantiate</h2>
+
+<pre><span class="k">var</span> u <span class="t">User</span>                      <span class="c">// (1) zero value — all fields set to "" / 0 / false</span>
+u := <span class="t">User</span>{}                     <span class="c">// (2) composite literal, zero value</span>
+u := <span class="t">User</span>{Name: <span class="s">"Naveen"</span>, Age: <span class="n">42</span>} <span class="c">// (3) named-field literal</span></pre>
+
+<div class="callout gold">
+<strong>Always use named-field literals.</strong> Positional literals like
+<code>User{"Naveen", 42, true}</code> compile, but break silently the
+moment you reorder a field.
+</div>
+
+<h2>What the memory actually looks like</h2>
+
+<p>When you write <code>u := User{Name: "Naveen", Age: 42}</code> inside
+<code>main</code>, Go puts a contiguous block on the <strong>stack</strong>
+of the <code>main</code> goroutine. Stack memory is reclaimed the instant
+the function returns — no garbage collector involved.</p>
+
+<div class="mem">
+  <div class="label stack">Stack · main</div>
+  <div class="box">
+    <div class="title">frame for <span style="color:var(--stack)">main</span></div>
+    <div class="frame">
+      <span class="name">u</span> <span class="type">User</span><br/>
+      <span class="field"><span class="k">Name</span>  <span class="v">→ "Naveen"</span></span>
+      <span class="field"><span class="k">Age</span>   <span class="v">= 42</span></span>
+      <span class="field"><span class="k">Active</span> <span class="v">= true</span></span>
+    </div>
+  </div>
+</div>
+
+<p>The <code>Name</code> field is a <code>string</code>, which itself is a
+small struct (<code>{ptr, len}</code>) — the actual characters live in a
+read-only data section. The <code>ptr</code> in the struct points to that
+data, so a string is already a tiny pointer indirection under the hood.</p>
+
+<h2>Field access is just an offset</h2>
+
+<p>When you write <code>u.Age</code>, the compiler computes a constant byte
+offset from the start of the struct. That's why field access is the same
+speed whether the struct is one field or fifty.</p>
+
+<pre><span class="v">u</span>.<span class="k">Age</span>        <span class="c">// read at offset 16</span>
+<span class="v">u</span>.<span class="k">Age</span> = <span class="n">43</span>    <span class="c">// write at offset 16</span>
+<span class="v">u</span>.<span class="k">Name</span>[<span class="n">0</span>]   <span class="c">// "N" — follows the string's ptr</span></pre>
+
+<h2>Copying is the default</h2>
+
+<p>This is the single fact that causes the most confusion later:</p>
+
+<pre><span class="k">func</span> <span class="v">birthday</span>(u <span class="t">User</span>) {
+    u.Age++
+}
+<span class="k">func</span> <span class="v">main</span>() {
+    u := <span class="t">User</span>{Name: <span class="s">"Naveen"</span>, Age: <span class="n">42</span>}
+    <span class="v">birthday</span>(u)         <span class="c">// passes a COPY of u</span>
+    fmt.Println(u.Age)   <span class="c">// still 42 — original untouched</span>
+}</pre>
+
+<p>Stack frames show why: the function's parameter <code>u</code> is a
+<em>separate</em> block of memory with the same field values.</p>
+
+<div class="mem-row">
+  <div class="col">
+    <h4>caller's frame</h4>
+    <div class="mem">
+      <div class="label stack">main</div>
+      <div class="box">
+        <div class="frame">
+          <span class="name">u</span> <span class="type">User</span><br/>
+          <span class="field"><span class="k">Age</span> <span class="v">= 42</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <h4>callee's frame</h4>
+    <div class="mem">
+      <div class="label stack">birthday</div>
+      <div class="box">
+        <div class="frame">
+          <span class="name">u</span> <span class="type">User</span> <span class="c">(copy)</span><br/>
+          <span class="field"><span class="k">Age</span> <span class="v">= 43</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p>To mutate the caller's struct, the callee needs a way to reach back into
+the caller's memory. That way is a <strong>pointer</strong> — and that's
+the whole point of the next lesson.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="b">
+  <p class="q">Given <code>var u User</code>, what is the value of <code>u.Age</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The compiler would reject this — uninitialized fields don't exist.">undefined; the compiler error</button>
+    <button class="opt" data-value="b" data-why="Every type has a zero value. For int it's 0, for string it's '', for bool it's false.">0</button>
+    <button class="opt" data-value="c" data-why="Only pointers and interfaces are nil by default. Value types are zero-valued.">nil</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">You want to print the fields of <code>u</code>. Which works?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="There's no printf verb that introspects a struct.">fmt.Printf("%v of type %T", u)</button>
+    <button class="opt" data-value="b" data-why="That's a slice literal. The compiler would error.">fmt.Println([u.Name, u.Age])</button>
+    <button class="opt" data-value="c" data-why="%v on a struct prints {Field: val Field: val ...}.">fmt.Printf("%+v\n", u)</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="0002-struct-pointers.html">Next: Pointers to structs →</a>
+    <a href="../reference/cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask your teacher (the agent) anything. Try: "show
+    me the hex offset of the Age field", or "why does the compiler add
+    padding to a bool field?".
+  </div>
+</footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

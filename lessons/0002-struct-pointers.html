@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L2 · Pointers to Structs — Go Structs & Pointers</title>
+<link rel="stylesheet" href="../assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="0001-structs-basics.html">← Structs</a>
+  <span class="here">Lesson 2 of 4</span>
+  <a href="0003-methods-receivers.html">Next: Methods →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 02 · Pointers</div>
+  <h1>Pointers to Structs</h1>
+  <p class="lede">A pointer is just a number that names a location in
+  memory. When that memory holds a struct, the pointer gives the callee a
+  handle back to the caller's data — copy-free, mutation-capable.</p>
+</header>
+
+<p>A <strong>pointer</strong> is a variable whose value is the address of
+another variable. In Go a pointer has a type — you can't make a
+<code>*User</code> point at an <code>int</code>.</p>
+
+<pre><span class="k">type</span> <span class="t">User</span> <span class="k">struct</span> { <span class="v">Name</span> <span class="t">string</span>; <span class="v">Age</span> <span class="t">int</span> }
+
+<span class="k">var</span> u  <span class="t">User</span>     <span class="c">// u       has type User,    value  {Name:"" Age:0}</span>
+<span class="k">var</span> p  <span class="o">*</span><span class="t">User</span>    <span class="c">// p       has type *User,   value  nil</span>
+p = &amp;u              <span class="c">// &amp;u      has type *User,   value  address-of-u</span>
+<span class="o">*</span>p = <span class="t">User</span>{<span class="v">Name</span>: <span class="s">"Naveen"</span>, <span class="v">Age</span>: <span class="n">42</span>}  <span class="c">// write through p</span>
+fmt.Println(u.Name) <span class="c">// "Naveen" — same memory</span></pre>
+
+<h2>The two operators, side by side</h2>
+
+<table class="trace">
+  <tr><th>Operator</th><th>Name</th><th>Effect</th></tr>
+  <tr><td><code>&amp;x</code></td><td>address-of</td><td>produces a pointer to <code>x</code></td></tr>
+  <tr><td><code>*p</code></td><td>dereference</td><td>produces the value <code>p</code> points at</td></tr>
+</table>
+
+<h2>Memory: pointer adds a heap, leaves the value alone</h2>
+
+<p>Taking the address of a local variable usually makes it <strong>escape
+to the heap</strong>. The Go compiler proves this at compile time: if a
+pointer to <code>u</code> could outlive <code>main</code>, <code>u</code>
+can't live on the stack anymore. It moves to the heap, and the garbage
+collector takes over.</p>
+
+<div class="mem">
+  <div class="label stack">Stack · main</div>
+  <div class="box">
+    <div class="title">frame for main</div>
+    <div class="frame">
+      <span class="name">p</span> <span class="type">*User</span><br/>
+      <span class="field"><span class="p">→ 0xC000·08A2B0</span></span>
+    </div>
+  </div>
+</div>
+
+<div class="ptr-arrow">↘ &nbsp; heap indirection &nbsp; ↘</div>
+
+<div class="mem">
+  <div class="label heap">Heap</div>
+  <div class="box">
+    <div class="title">escape-analyzed allocation</div>
+    <div class="frame">
+      <span class="name">(*p)</span> <span class="type">User</span><br/>
+      <span class="field"><span class="k">Name</span> <span class="v">= "Naveen"</span></span>
+      <span class="field"><span class="k">Age</span>  <span class="v">= 42</span></span>
+    </div>
+  </div>
+</div>
+
+<p>The stack frame holds only the pointer (8 bytes). The struct lives on
+the heap (here, 32 bytes including padding). Reading <code>*p</code> means
+"follow the arrow".</p>
+
+<div class="callout">
+<strong>Why does this matter?</strong> Every struct value you pass through
+a channel, store in a slice beyond a small size, or return from a function
+whose address you keep, ends up on the heap. Pointer-heavy code is
+heap-heavy code.
+</div>
+
+<h2>Auto-dereference: Go's best ergonomic gift</h2>
+
+<p>In C, <code>(*p).Field</code> is mandatory. In Go, the compiler does it
+for you:</p>
+
+<pre><span class="k">var</span> p <span class="o">*</span><span class="t">User</span> = &amp;<span class="t">User</span>{<span class="v">Name</span>: <span class="s">"Naveen"</span>, <span class="v">Age</span>: <span class="n">42</span>}
+fmt.Println(<span class="o">*</span>p.Name)     <span class="c">// syntax error — parses as *(p.Name)</span>
+fmt.Println((<span class="o">*</span>p).Name)   <span class="c">// fine, but ugly</span>
+fmt.Println(p.Name)        <span class="c">// fine, idiomatic — Go auto-dereferences</span>
+p.Age = <span class="n">43</span>            <span class="c">// ditto for assignment</span></pre>
+
+<p>Field access and method calls are the only two operations Go
+auto-dereferences for. <em>Arithmetic, indexing, and range loops on
+pointers do not auto-dereference.</em> The grammar in the
+<a href="https://go.dev/ref/spec#Selectors">Selectors section</a> of the
+spec encodes this exactly.</p>
+
+<h2>Three ways to get a <code>*T</code></h2>
+
+<pre><span class="k">type</span> <span class="t">T</span> <span class="k">struct</span> { <span class="v">X</span> <span class="t">int</span> }
+
+<span class="c">// (1) address-of a literal — most common</span>
+p1 := &amp;<span class="t">T</span>{<span class="v">X</span>: <span class="n">1</span>}
+
+<span class="c">// (2) address-of an existing value</span>
+v  := <span class="t">T</span>{<span class="v">X</span>: <span class="n">2</span>}
+p2 := &amp;v
+
+<span class="c">// (3) new — zero-valued, on the heap</span>
+p3 := <span class="k">new</span>(<span class="t">T</span>)  <span class="c">// *T pointing to {X: 0}</span></pre>
+
+<div class="mem-row">
+  <div class="col">
+    <h4>&amp;T{X: 1}</h4>
+    <pre style="margin:0"><code>heap:
+  ┌────────┐
+  │ X = 1  │
+  └────────┘
+  ↑
+stack: p1</code></pre>
+  </div>
+  <div class="col">
+    <h4>new(T)</h4>
+    <pre style="margin:0"><code>heap:
+  ┌────────┐
+  │ X = 0  │  ← zero value
+  └────────┘
+  ↑
+stack: p3</code></pre>
+  </div>
+</div>
+
+<p><code>new(T)</code> and <code>&amp;T{}</code> produce the same shape, but
+<code>new</code> is rarely the right choice — most Go code prefers
+<code>&amp;T{...}</code> so the initial values are visible at the call
+site.</p>
+
+<h2>The nil pointer trap</h2>
+
+<div class="callout warn">
+<strong>Dereferencing a nil pointer panics.</strong> There is no automatic
+"null object" or "default value" — a nil <code>*T</code> is just an
+address of zero, and reading from address zero is a runtime error.
+</div>
+
+<pre><span class="k">var</span> p <span class="o">*</span><span class="t">User</span>           <span class="c">// p == nil</span>
+fmt.Println(p.Name)   <span class="c">// panic: runtime error: invalid memory address</span>
+
+<span class="c">// guard with an explicit check</span>
+<span class="k">if</span> p != <span class="k">nil</span> {
+    fmt.Println(p.Name)
+}</pre>
+
+<p>Constructors in idiomatic Go return <code>(*T, error)</code> so the
+caller can never silently hold a nil:</p>
+
+<pre><span class="k">func</span> <span class="v">NewUser</span>(name <span class="t">string</span>) (<span class="o">*</span><span class="t">User</span>, <span class="t">error</span>) {
+    <span class="k">if</span> name == <span class="s">""</span> {
+        <span class="k">return</span> <span class="k">nil</span>, <span class="t">errors</span>.New(<span class="s">"empty name"</span>)
+    }
+    <span class="k">return</span> &amp;<span class="t">User</span>{<span class="v">Name</span>: name}, <span class="k">nil</span>
+}</pre>
+
+<h2>Putting it together: the same struct, three places</h2>
+
+<pre><span class="k">func</span> <span class="v">main</span>() {
+    a := <span class="t">User</span>{<span class="v">Name</span>: <span class="s">"A"</span>}    <span class="c">// stack value</span>
+    b := &amp;<span class="t">User</span>{<span class="v">Name</span>: <span class="s">"B"</span>}  <span class="c">// heap value, pointer on stack</span>
+    c := <span class="k">new</span>(<span class="t">User</span>)         <span class="c">// heap value, zeroed, pointer on stack</span>
+    c.Name = <span class="s">"C"</span>
+
+    fmt.Println(a.Name, b.Name, c.Name) <span class="c">// A B C</span>
+    b.Name = <span class="s">"B!"</span>               <span class="c">// mutation via pointer</span>
+}</pre>
+
+<div class="mem">
+  <div class="label stack">Stack · main</div>
+  <div class="box">
+    <div class="frame"><span class="name">a</span> <span class="type">User</span>    <span class="field"><span class="k">Name</span> <span class="v">="A"</span></span></div>
+    <div class="frame"><span class="name">b</span> <span class="type">*User</span>   <span class="field"><span class="p">→ 0x…A2B0</span></span></div>
+    <div class="frame"><span class="name">c</span> <span class="type">*User</span>   <span class="field"><span class="p">→ 0x…A2C8</span></span></div>
+  </div>
+</div>
+
+<div class="ptr-arrow">↘ ↘ &nbsp; two heap allocations &nbsp; ↘ ↘</div>
+
+<div class="mem">
+  <div class="label heap">Heap</div>
+  <div class="box">
+    <div class="frame"><span class="name">@A2B0</span> <span class="type">User</span>  <span class="field"><span class="k">Name</span> <span class="v">="B!"</span></span></div>
+    <div class="frame"><span class="name">@A2C8</span> <span class="type">User</span>  <span class="field"><span class="k">Name</span> <span class="v">="C"</span></span></div>
+  </div>
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">What is the type of <code>&amp;User{"Naveen"}</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="&amp; of any value T produces a *T. The struct literal evaluates first, then &amp; takes its address.">*User</button>
+    <button class="opt" data-value="b" data-why="&amp; never returns a value type — that's the whole point.">User</button>
+    <button class="opt" data-value="c" data-why="unsafe.Pointer requires an explicit conversion. Go does not infer it.">unsafe.Pointer</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">After <code>p := new(User)</code>, what does <code>p.Name</code> evaluate to?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="That would require a nil dereference panic.">runtime panic</button>
+    <button class="opt" data-value="b" data-why="new returns a real, non-nil pointer to a zero-valued T.">nil</button>
+    <button class="opt" data-value="c" data-why="new(T) zero-initializes the struct. The string zero value is the empty string.">""</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">Reading <code>(*p).Age</code> requires the parentheses because…</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="In Go, * binds tighter than ., so *p.Age parses as *(p.Age) — a type error since p has no .Age.">Go's precedence rules — without parens it parses as *(p.Age)</button>
+    <button class="opt" data-value="b" data-why="The standard fix is to drop the dereference: p.Age auto-dereferences and is clearer.">It's discouraged — write p.Age instead and let Go auto-dereference</button>
+    <button class="opt" data-value="c" data-why="Both forms work; idiomatic Go strongly prefers the auto-deref form.">It's a syntax error in Go 1.22+</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="0001-structs-basics.html">← Structs</a>
+    <a href="0003-methods-receivers.html">Next: Methods & receivers →</a>
+    <a href="../reference/cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "when does Go put a value on the heap vs the
+    stack?" or "show me what <code>escape analysis</code> prints for this
+    program".
+  </div>
+</footer>
+
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
