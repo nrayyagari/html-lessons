@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L3 · IAM — Azure RG vs GCP projects</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="02-hierarchy.html">← Hierarchy</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 3 of 4</span>
+  <a href="04-practical-patterns.html">Next: Practical patterns →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 03 · IAM</div>
+  <h1>IAM: role assignments, scope, and inheritance</h1>
+  <p class="lede">Both clouds let you grant a principal a role at a
+  scope. Azure calls the scope a "role assignment"; GCP calls it a
+  "policy binding". Same idea, different vocabulary, one sharp
+  difference in how the <em>default</em> behaves.</p>
+</header>
+
+<p>IAM has three moving parts on every cloud:</p>
+
+<ol>
+  <li><strong>Principal</strong> &mdash; who: user, group, service account, managed identity, workload identity.</li>
+  <li><strong>Role</strong> &mdash; what: a named bundle of permissions
+    (e.g. <code>Storage Object Reader</code>, <code>Virtual Machine
+    Contributor</code>).</li>
+  <li><strong>Scope</strong> &mdash; where: the boundary the role applies
+    within (Azure RG, GCP project, or higher).</li>
+</ol>
+
+<p>Granting is always <em>(principal, role, scope)</em>. The
+difference between Azure and GCP is mostly vocabulary, the shape of
+the scope, and one critical default: <strong>how roles combine</strong>.</p>
+
+<h2>Azure: RBAC role assignments</h2>
+
+<p>You write a role assignment as a separate resource. The scope is
+explicit:</p>
+
+<pre><span class="k">apiVersion</span>: authorization.rbac.authorization.k8s.io/v1
+<span class="k">kind</span>: RoleAssignment        <span class="c"># usually created via portal/CLI/Terraform, not raw YAML</span>
+<span class="k">scope</span>:
+  /subscriptions/<span class="x">00000000-…</span>/resourceGroups/<span class="x">payments-prod-rg</span>
+<span class="k">properties</span>:
+  <span class="k">principalId</span>: <span class="x">&lt;object-id-of-the-user-or-group&gt;</span>
+  <span class="k">roleDefinitionId</span>: <span class="x">&lt;guid-of-the-role&gt;</span>
+  <span class="c"># e.g. b24988ac-6180-42a0-ab88-20f7382dd24c == "Contributor"</span></pre>
+
+<p>Key properties of Azure RBAC:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>Roles are additive</strong><p>If a user has <code>Reader</code> at the subscription and
+      <code>Contributor</code> at an RG, they have <em>both</em> on the
+      RG. There's no "deny" except via Azure Blueprints Deny
+      assignments or explicit deny rules &mdash; which are separate
+      constructs.</p></div></div>
+  <div class="step"><div class="body"><strong>Roles are denormalized</strong><p>There's no inheritance optimization. The "Reader at
+      subscription" role isn't "inherited" at the RG level &mdash; it's
+      re-evaluated at every API call. The effect is the same, but
+      the implementation is per-call, not per-resource.</p></div></div>
+  <div class="step"><div class="body"><strong>Built-in vs custom roles</strong><p>Azure ships ~200 built-in roles (Reader, Contributor,
+      Owner, plus per-service). Custom roles are JSON definitions
+      of permission sets you assemble yourself.</p></div></div>
+</div>
+
+<h2>GCP: IAM policy bindings</h2>
+
+<p>In GCP, the IAM policy is a single object attached to a resource.
+You modify it with <code>gcloud</code> or Terraform &mdash; you
+don't create a separate "RoleAssignment" object:</p>
+
+<pre><span class="v">$ gcloud</span> projects add-iam-policy-binding <span class="x">payments-prod</span> \
+    --member=<span class="s">"user:alice@example.com"</span> \
+    --role=<span class="s">"roles/storage.objectViewer"</span></pre>
+
+<p>The same effect, expressed declaratively as part of the project's
+policy:</p>
+
+<pre><span class="c"># terraform</span>
+<span class="k">resource</span> <span class="s">"google_project_iam_binding"</span> <span class="s">"alice_readonly"</span> {
+  <span class="k">project</span> = <span class="s">"payments-prod"</span>
+  <span class="k">role</span>    = <span class="s">"roles/storage.objectViewer"</span>
+  <span class="k">members</span> = [
+    <span class="s">"user:alice@example.com"</span>,
+  ]
+}</pre>
+
+<p>Key properties of GCP IAM:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>Roles are additive (same as Azure)</strong><p>Multiple bindings at any level combine. No deny in the
+      default policy model (deny requires the separate Access
+      Context Manager / Access Transparency features).</p></div></div>
+  <div class="step"><div class="body"><strong>Inheritance is real</strong><p>If <code>alice</code> has a role on the Org, it propagates to
+      every folder, project, and resource under it. The effective
+      IAM is the union of all bindings from the root down to the
+      resource being checked.</p></div></div>
+  <div class="step"><div class="body"><strong>Roles are pre-built</strong><p>GCP has ~2500 predefined roles (per-service, per-resource).
+      Custom roles are JSON, but the convention is to use predefined
+      ones unless you really need custom.</p></div></div>
+</div>
+
+<h2>The default that bites people: <em>default deny</em></h2>
+
+<p>Both clouds deny everything by default. The difference is <em>when
+that default is computed</em>.</p>
+
+<div class="compare">
+  <div class="col bad">
+    <h4>Azure: explicit at every scope</h4>
+    <p>There's no "I get access by being in the right AAD group." You
+    need a role assignment for each (principal, role, scope) tuple.
+    If you want a user to read an RG, you create a role assignment.
+    The portal has "Access control (IAM)" pages to make this easy,
+    but it's still a per-scope grant.</p>
+  </div>
+  <div class="col good">
+    <h4>GCP: inheritance helps the team model</h4>
+    <p>Grant <code>roles/viewer</code> to an AAD/Google group at the
+    Engineering folder once, and every project under it inherits
+    the binding. The team doesn't have to re-grant per-project.</p>
+  </div>
+</div>
+
+<p>Azure inheritance works the same way at the subscription level
+(via "Access control (IAM)" on the subscription), but most teams
+manage RGs as the unit of access, which means more role assignments
+in total. The flat hierarchy forces you to be explicit; the nested
+hierarchy lets you be lazy once and inherit forever.</p>
+
+<h2>Service accounts: where the clouds really differ</h2>
+
+<p>Service accounts are the "give my code a credential" feature. The
+shape is different enough to trip people up:</p>
+
+<table class="trace">
+  <tr><th>Concept</th><th>Azure</th><th>GCP</th></tr>
+  <tr><td>The principal type</td><td><strong>Managed Identity</strong> (system-assigned or user-assigned)</td><td><strong>Service Account</strong> (an identity, not a thing attached to one resource)</td></tr>
+  <tr><td>Created where</td><td>Auto-created when you enable it on a resource, or explicit in the resource's identity blade</td><td>Explicit: <code>gcloud iam service-accounts create</code> or Terraform</td></tr>
+  <tr><td>How workloads authenticate</td><td>IMDS endpoint returns an OAuth token &mdash; no secret to manage</td><td>Either: (a) attach a JSON key file (legacy), (b) Workload Identity Federation with k8s, or (c) metadata server in GCP VMs</td></tr>
+  <tr><td>Cross-cloud</td><td>Federate with Entra ID &mdash; AAD service principal in another tenant</td><td>Workload Identity Federation with any OIDC provider (GitHub Actions, k8s, AWS, Azure)</td></tr>
+</table>
+
+<p>The general principle: <strong>don't manage long-lived keys</strong>.
+Both clouds have a way to give a workload a short-lived token
+without you ever seeing a secret. Use it. The era of "download a
+JSON credential file" is over.</p>
+
+<div class="callout warn">
+<strong>Anti-pattern: managed-identity JSON key files in Azure.</strong>
+A managed identity's "secret" is the IMDS endpoint, not a key. If
+you find yourself copying a credential from a managed identity into
+a config file, you're doing it wrong.
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">A user has <code>Reader</code> at the subscription and <code>Contributor</code> at one RG. What can they do in that RG?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Both Azure and GCP IAM is additive. The user ends up with the union: Reader (read everything) plus Contributor (modify everything) at the RG.">Everything Reader can do, plus everything Contributor can do</button>
+    <button class="opt" data-value="b" data-why="Roles combine additively in both clouds; there's no override of "more specific wins".">Only Contributor — the more-specific role wins</button>
+    <button class="opt" data-value="c" data-why="Subscription-level grants propagate down to the RG in Azure RBAC. They're not ignored.">Nothing — the subscription grant doesn't reach the RG</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">What's the GCP analog of an Azure "Managed Identity"?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Workload Identity Federation is the modern way to give a non-GCP workload (e.g. GKE, GitHub Actions) a GCP service account, but it's not the identity itself.">Workload Identity Federation</button>
+    <button class="opt" data-value="b" data-why="GCP's identity-for-workloads primitive is the service account. WIF is the mechanism to give one to a non-GCP workload; the SA is the thing being granted.">A Service Account</button>
+    <button class="opt" data-value="c" data-why="OAuth client IDs are for end-user auth flows, not workload identity.">An OAuth 2.0 client ID</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">In GCP, a user has <code>roles/viewer</code> at the Org and <code>roles/editor</code> at one project. What can they do in that project?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Editor is at the project; Viewer is at the org. The Viewer is inherited (the user also has Viewer on the project via the org binding), so they end up with both.">Only Editor — Viewer at the org doesn't reach the project</button>
+    <button class="opt" data-value="b" data-why="Editor at the project is the most specific grant — but GCP doesn't override; it unions.">Only Viewer — Editor at the project is overridden by Viewer at the org</button>
+    <button class="opt" data-value="c" data-why="GCP IAM unions all bindings. The user ends up with both Editor (project-level) and Viewer (org-level, inherited). They can do everything in the project.">Both Editor and Viewer (union of all bindings)</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-hierarchy.html">← Hierarchy</a>
+    <a href="04-practical-patterns.html">Next: Practical patterns →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me how to federate a GitHub
+    Actions workflow with GCP Workload Identity Federation", or
+    "what's the Terraform for granting an AAD group Owner on an RG?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

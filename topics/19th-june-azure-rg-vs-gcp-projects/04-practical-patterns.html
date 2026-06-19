@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L4 · Practical patterns — Azure RG vs GCP projects</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="03-iam.html">← IAM</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 4 of 4</span>
+  <a href="../../index.html">⌂ All topics</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 04 · Practice</div>
+  <h1>Naming, tagging, and the layout that doesn't bite you later</h1>
+  <p class="lede">The single biggest predictor of cloud-bill regret is
+  the group/project layout you set on day one. Get it right and
+  you can answer "what does this cost" in two clicks. Get it wrong
+  and you spend a year untangling it.</p>
+</header>
+
+<h2>Naming conventions</h2>
+
+<p>Both clouds enforce different rules (covered in lesson 1). The
+real question is: what's the <em>convention</em> you commit to as a
+team?</p>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Azure RG naming</h4>
+    <p><code>&lt;app&gt;-&lt;env&gt;-&lt;region&gt;-rg</code></p>
+    <p>Examples: <code>payments-prod-eus-rg</code>,
+    <code>search-staging-wus2-rg</code>, <code>data-shared-neu-rg</code>.</p>
+    <p>Region in the name is helpful because a single subscription
+    can host resources in many regions, and the RG is the unit of
+    deletion &mdash; "delete the staging RG in westus2" is unambiguous.</p>
+  </div>
+  <div class="col good">
+    <h4>GCP project naming</h4>
+    <p><code>&lt;app&gt;-&lt;env&gt;</code> (project ID has dashes; project
+    name can have spaces for display)</p>
+    <p>Examples: <code>payments-prod</code>, <code>search-staging</code>,
+    <code>data-shared</code>.</p>
+    <p>Region is <em>not</em> in the project name because projects
+    are inherently multi-region. Region lives at the resource
+    level (the bucket, the VM, the cluster).</p>
+  </div>
+</div>
+
+<p>The reason the two conventions differ: in Azure, the RG is
+often used to co-locate resources of a single application
+("everything for payments lives in <code>payments-prod-eus-rg</code>,
+even if some of it crosses regions"). In GCP, the project usually
+co-locates a single application across regions naturally
+("<code>payments-prod</code> has us-east1, europe-west1, and
+asia-northeast1 resources").</p>
+
+<div class="callout">
+<strong>One rule that doesn't change.</strong> Whatever convention
+you pick, encode it in your Infrastructure-as-Code as a
+<em>validation</em>, not just a doc. A naming convention that isn't
+checked by <code>terraform validate</code> or a CI lint will
+silently drift within a quarter.
+</div>
+
+<h2>Tagging: the second axis of organization</h2>
+
+<p>Tags (Azure) and labels (GCP) are key-value pairs on every
+resource. They don't affect hierarchy or IAM, but they make
+filtering and reporting possible across the hierarchy.</p>
+
+<pre><span class="c"># Azure: tags are a flat object on every resource</span>
+<span class="k">tags</span> = {
+  <span class="k">Environment</span> = <span class="s">"prod"</span>
+  <span class="k">Team</span>        = <span class="s">"payments"</span>
+  <span class="k">CostCenter</span>  = <span class="s">"10042"</span>
+  <span class="k">Owner</span>       = <span class="s">"alice@example.com"</span>
+  <span class="k">DataClass</span>   = <span class="s">"pci"</span>
+}
+
+<span class="c"># GCP: labels are the same shape</span>
+<span class="k">labels</span> = {
+  <span class="k">environment</span> = <span class="s">"prod"</span>
+  <span class="k">team</span>        = <span class="s">"payments"</span>
+  <span class="k">cost-center</span> = <span class="s">"10042"</span>
+  <span class="k">owner</span>       = <span class="s">"alice@example.com"</span>
+  <span class="k">data-class</span>  = <span class="s">"pci"</span>
+}</pre>
+
+<p>Both clouds support cost-allocation reports that roll up by tag
+key. The ones that matter most:</p>
+
+<table class="trace">
+  <tr><th>Tag</th><th>Used for</th></tr>
+  <tr><td><code>environment</code> / <code>env</code></td><td>Filter cost reports by prod / stage / dev</td></tr>
+  <tr><td><code>team</code> / <code>owner</code></td><td>Route alerts to the right Slack channel or pager</td></tr>
+  <tr><td><code>cost-center</code></td><td>Chargeback to a finance code</td></tr>
+  <tr><td><code>data-class</code> / <code>compliance</code></td><td>Identify resources in scope for PCI / HIPAA / SOC2 audits</td></tr>
+  <tr><td><code>ttl</code> / <code>expires-after</code></td><td>Sandboxes and dev environments with an auto-cleanup</td></tr>
+</table>
+
+<h2>Policy enforcement</h2>
+
+<p>Tags and naming conventions are only as good as their
+enforcement. Both clouds have a policy layer that can refuse
+non-compliant resources at creation time:</p>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Azure Policy</h4>
+    <p>Assignments with effect
+    <code>Deny</code> / <code>Audit</code> / <code>Append</code>.
+    Initiatives group related policies. Examples:
+    "Allowed locations", "Required tags", "SKU restrictions".</p>
+    <p>Scope: MG, subscription, RG. Inherited downward.</p>
+  </div>
+  <div class="col good">
+    <h4>GCP Org Policy</h4>
+    <p>Constraints with <code>deny</code> / <code>allow</code>
+    enforcement. Examples: <code>constraints/compute.disableInternetNetworkEndpointGroup</code>,
+    <code>constraints/iam.allowedPolicyMemberDomains</code>.</p>
+    <p>Scope: org, folder, project. Inherited downward.</p>
+  </div>
+</div>
+
+<p>The two systems are different in detail but solve the same
+problem. The lesson is the same: <em>enforce the rule at the
+boundary, not after the fact</em>.</p>
+
+<h2>When to split a group/project</h2>
+
+<p>The most common "should I split this?" question, answered:</p>
+
+<div class="compare">
+  <div class="col bad">
+    <h4>Split when…</h4>
+    <ul>
+      <li>Different access teams</li>
+      <li>Different cost owners / chargeback codes</li>
+      <li>Different lifecycle (sandbox vs prod)</li>
+      <li>Different compliance boundary (PCI vs non-PCI)</li>
+      <li>Resource count > 800 in one group (limits &amp; UI slowdown)</li>
+    </ul>
+  </div>
+  <div class="col good">
+    <h4>Don't split just for…</h4>
+    <ul>
+      <li>Visual organization (use tags/label)</li>
+      <li>Region separation (resources can be in different regions within one RG)</li>
+      <li>"Cleanliness" (one VM is fine to live in the same RG as 50 others)</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Migration: from one cloud to the other</h2>
+
+<p>The most common reasons teams move between Azure and GCP:</p>
+
+<ul>
+  <li><strong>Acquisition</strong> &mdash; your company bought a company on the other cloud.</li>
+  <li><strong>Best-of-breed</strong> &mdash; GCP's data products (BigQuery, Dataflow) are best-in-class; Azure's enterprise integration is best-in-class.</li>
+  <li><strong>Cost</strong> &mdash; one cloud has better pricing for your workload shape.</li>
+</ul>
+
+<p>The pattern that actually works:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>1. Map the topology, not the resources</strong><p>Don't try to map "this VM to that VM." Map the <em>groups</em>:
+      what are your top-level containers, and what lives in each?
+      You'll have the same grouping problem on the other side; it
+      just looks different.</p></div></div>
+  <div class="step"><div class="body"><strong>2. Build the new hierarchy first</strong><p>Stand up the new MG tree / folder tree <em>before</em> you
+      migrate anything. Validate the IAM model. Get comfortable
+      with the cost reports. Then start moving.</p></div></div>
+  <div class="step"><div class="body"><strong>3. Migrate per-group, with rollback</strong><p>Pick the lowest-risk group first (internal tool, non-customer-facing).
+      Migrate it end-to-end. Cut over. Roll back if anything breaks.
+      Repeat.</p></div></div>
+  <div class="step"><div class="body"><strong>4. Don't try to do identity federation day 1</strong><p>Cross-cloud identity federation (Azure AD ↔ Google Workspace) is a
+      real project, but it's a <em>separate</em> project from
+      migration. Do it after the workloads are stable.</p></div></div>
+</div>
+
+<div class="callout warn">
+<strong>The single biggest migration mistake.</strong> "Let's just
+replicate the existing structure on the new cloud" &mdash; without
+asking whether the old structure was right in the first place. Most
+group structures have accreted over years. Use the migration as a
+chance to fix them.
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You have a sandbox environment that auto-provisions and tears down 200 test resources a day. What's the right way to handle the resource group / project?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Use tags like ttl/expires-after to mark short-lived resources, and a script (Azure Automation / GCP Cloud Functions) to delete what exceeds the TTL. Don't burn hours on RG/PRJ lifecycle management for ephemeral resources.">Tag every resource with a TTL; a job cleans up anything past it</button>
+    <button class="opt" data-value="b" data-why="One RG per test would be 200 RGs/day — that's a naming and quota nightmare, and the RG structure becomes a useless graveyard.">Create a fresh RG/project for every test</button>
+    <button class="opt" data-value="c" data-why="Sharing one RG with production defeats the point of a sandbox — your cleanup script could nuke real prod data, and the IAM boundary is gone.">Put them all in the same RG/project as production to save on RG overhead</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">Your team has 4 applications, each with prod/staging/dev. How many RGs (Azure) or projects (GCP) do you need at minimum?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="You'd be coupling unrelated applications in the same lifecycle, and one team's prod change risks another team's prod.">4 total — one per application, sharing staging/dev across apps</button>
+    <button class="opt" data-value="b" data-why="Each app has 3 environments × 4 apps = 12 RGs. That's the unit of least-privilege, lifecycle, and cost per team per env.">12 total — one per app per environment</button>
+    <button class="opt" data-value="c" data-why="You'd need a subscription (Azure) or folder (GCP) per env. That works for governance but not for per-team cost — you'd need tags for that anyway.">3 total — one per environment, all apps sharing</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">What should you do first when migrating from Azure to GCP (or vice versa)?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="You can't migrate without a target structure. Migration tooling needs to know where to put things.">Move the largest workload first to derisk the project</button>
+    <button class="opt" data-value="b" data-why="Identity federation is a separate, complex project. Doing it before the workload migration is ready means you have no workloads to federate against.">Set up cross-cloud identity federation first</button>
+    <button class="opt" data-value="c" data-why="Build the new MG tree / folder tree first. Validate IAM. Get comfortable with cost reports. Then start moving workloads.">Build the new hierarchy (MGs/folders) first; validate IAM and cost reports; then migrate</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="03-iam.html">← IAM</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../../index.html">⌂ All topics</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me a Terraform module that
+    enforces the naming convention", or "how do I write a Cloud
+    Function that auto-deletes expired sandboxes?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Go syntax and pointers — June 2026</title>
+<link rel="stylesheet" href="./assets/main.css" />
+<style>
+  .topic-hero { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-card)) 0%, var(--bg-card) 70%); border:1px solid var(--border); border-radius: var(--radius-xl); padding: 36px 32px; margin-bottom: 24px; position: relative; overflow: hidden; }
+  .topic-hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent); filter: blur(40px); }
+  .topic-hero .meta { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.18em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .topic-hero h1 { margin:8px 0 10px; font-family:"Inter",sans-serif; font-size:36px; letter-spacing: -0.015em; }
+  .topic-hero p  { margin:0; color:var(--fg-muted); font-size:18px; max-width:60ch; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap:16px; margin:24px 0; }
+  .card { background:var(--bg-card); border:1px solid var(--border); border-radius: var(--radius-lg); padding:20px 22px; transition: border-color 120ms, transform 120ms, box-shadow 120ms; box-shadow: var(--shadow-sm); }
+  .card:hover { border-color:var(--accent); transform: translateY(-2px); box-shadow: var(--shadow); }
+  .card a { color:inherit; border:none; }
+  .card .num { font-family:"JetBrains Mono", monospace; font-size:12px; letter-spacing:0.15em; color:var(--accent); text-transform:uppercase; font-weight: 600; }
+  .card h3 { margin:6px 0 8px; font-family:"Inter",sans-serif; font-size:18px; }
+  .card p { margin:0; color:var(--fg-muted); font-size:14.5px; }
+</style>
+</head>
+<body>
+<main>
+
+<div class="topic-hero">
+  <div class="meta">Topic · 19 June 2026</div>
+  <h1>Go syntax and pointers</h1>
+  <p>Four lessons answering the question &ldquo;is Go syntax
+  hard?&rdquo;: the honest case, the whole language in one page,
+  pointers without arithmetic, and the six common confusions
+  everyone hits once.</p>
+</div>
+
+<h2>Lessons</h2>
+<div class="grid">
+  <div class="card">
+    <a href="01-is-it-hard.html">
+      <div class="num">L1 · The honest answer</div>
+      <h3>Is Go syntax hard?</h3>
+      <p>Why "hard" usually means "absent", and a list of the
+      features Go deliberately doesn't have.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="02-whole-language.html">
+      <div class="num">L2 · The whole language</div>
+      <h3>The whole language</h3>
+      <p>All 25 keywords, the four statement forms, and the
+      <code>defer</code> trick.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="03-pointers-without-arithmetic.html">
+      <div class="num">L3 · Pointers</div>
+      <h3>Pointers without arithmetic</h3>
+      <p>The two operators, what you can and can't do, and why
+      "no arithmetic" is the whole point.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="04-common-confusions.html">
+      <div class="num">L4 · The gotchas</div>
+      <h3>Common confusions</h3>
+      <p>Range loop capture, nil map writes, slice sharing,
+      goroutine leaks, and the typed-nil interface trap.</p>
+    </a>
+  </div>
+</div>
+
+<h2>Reference</h2>
+<p>
+  <a href="cheatsheet.md">Cheat sheet (markdown)</a> &mdash;
+  the 25 keywords, the two pointer operators, and the
+  "this is normal" list.
+</p>
+
+<h2>Primary source</h2>
+<p>
+  The official <a href="https://go.dev/tour/">Go tour</a> and
+  <a href="https://go.dev/doc/effective_go">Effective Go</a>
+  are the canonical starting points. For the deep dive on
+  pointers, the
+  <a href="https://go.dev/ref/spec#Pointer_types">Go spec &sect;Pointer types</a>
+  is the source of truth.
+</p>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="../../index.html">⌂ All topics</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Start at L1 →</strong>
+    <a href="01-is-it-hard.html">01-is-it-hard.html</a>
+  </div>
+</footer>
+
+</main>
+</body>
+</html>

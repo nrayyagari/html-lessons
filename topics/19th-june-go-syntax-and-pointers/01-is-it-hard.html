@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L1 · Is Go syntax hard? — Go syntax and pointers</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="../../index.html">⌂ All topics</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 1 of 4</span>
+  <a href="02-whole-language.html">Next: The whole language →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 01 · The honest answer</div>
+  <h1>Is Go syntax hard?</h1>
+  <p class="lede">Short answer: no. Longer answer: the syntax is
+  deliberately small — fewer keywords than most languages you have
+  used — and most of what people call "hard" about Go is the
+  intentional omission of familiar features, not added complexity.</p>
+</header>
+
+<p>You have probably seen people online call Go syntax "weird" or
+"hard" or "missing things". Most of those comments are about
+expectations, not the language. Go was designed in 2007 at Google
+specifically because the alternatives were felt to be <em>too
+complex</em> for large teams writing large backends. The
+conservativeness is the feature.</p>
+
+<h2>What people mean when they say "hard"</h2>
+
+<p>Let me list the things that surprise newcomers. None of them is
+the syntax — they are the <em>absences</em>.</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>"Where are the classes?"</strong><p>Go has no <code>class</code> keyword. You attach methods to any
+      type via a receiver. The behavior is class-like, the syntax
+      isn't. This is a feature once you internalize it &mdash;
+      you can give methods to types you don't own (including
+      primitives).</p></div></div>
+  <div class="step"><div class="body"><strong>"Where is the inheritance?"</strong><p>There isn't one. Composition only. You embed a struct inside
+      another struct; the inner type's methods are promoted to the
+      outer. This is the same as the existing
+      <a href="../../topics/19th-june-go-structs-and-pointers/04-embedding-and-composition.html">structs &amp; pointers series</a>
+      covered. It feels limiting for a week, then liberating forever.</p></div></div>
+  <div class="step"><div class="body"><strong>"Where are the generics?"</strong><p>Go 1.18 (2022) added them. <code>func Map[T any](s []T, f func(T) T) []T</code>
+      works. The syntax is deliberately minimal &mdash; no
+      variance, no higher-kinded types, no monads.</p></div></div>
+  <div class="step"><div class="body"><strong>"What about exceptions?"</strong><p>No exceptions. Errors are values: <code>func foo() (T, error)</code>.
+      You handle them at the call site. People who came from Python
+      or Java find this verbose; people who came from C find it
+      honest. The verbosity is the cost of explicitness.</p></div></div>
+</div>
+
+<div class="callout">
+<strong>Every "weird" thing in Go is an absence, not an addition.</strong>
+If you find yourself writing Go and wishing the language had a
+feature you know from elsewhere, check whether the language has a
+deliberate alternative. It usually does. The frustration is the
+adjustment, not the language.
+</div>
+
+<h2>The whole grammar, by example</h2>
+
+<p>Here's a complete Go file. Every keyword in the language appears
+in it. (Yes, really.)</p>
+
+<pre><span class="k">package</span> <span class="v">main</span>
+
+<span class="k">import</span> (
+    <span class="s">"fmt"</span>
+    <span class="s">"errors"</span>
+)
+
+<span class="k">type</span> <span class="t">Counter</span> <span class="k">struct</span> {
+    <span class="v">n</span> <span class="t">int</span>
+}
+
+<span class="k">func</span> (c <span class="o">*</span><span class="t">Counter</span>) <span class="v">Inc</span>() <span class="c">// pointer receiver — mutates</span>
+    { c.n++ }
+
+<span class="k">func</span> <span class="v">New</span>(start <span class="t">int</span>) <span class="o">*</span><span class="t">Counter</span> {
+    <span class="k">if</span> start &lt; <span class="n">0</span> {
+        <span class="k">return</span> <span class="k">nil</span>, <span class="v">errors</span>.<span class="v">New</span>(<span class="s">"negative start"</span>)
+    }
+    <span class="k">return</span> &amp;<span class="t">Counter</span>{<span class="v">n</span>: start}, <span class="k">nil</span>
+}
+
+<span class="k">func</span> <span class="v">main</span>() {
+    c, err := <span class="v">New</span>(<span class="n">0</span>)
+    <span class="k">if</span> err != <span class="k">nil</span> { <span class="k">return</span> }
+    <span class="k">for</span> i := <span class="n">0</span>; i &lt; <span class="n">3</span>; i++ {
+        <span class="v">c</span>.<span class="v">Inc</span>()
+    }
+    <span class="v">fmt</span>.<span class="v">Println</span>(c.n)  <span class="c">// 3</span>
+}</pre>
+
+<p>Keywords used: <code>package</code>, <code>import</code>,
+<code>type</code>, <code>struct</code>, <code>func</code>,
+<code>if</code>, <code>else</code>, <code>return</code>,
+<code>for</code>, <code>nil</code>. That's 10. The full
+keyword list has 25 entries. You can learn the entire grammar in a
+weekend.</p>
+
+<h2>How Go compares, on the dimensions people argue about</h2>
+
+<table class="trace">
+  <tr><th>Feature</th><th>Go</th><th>Python</th><th>Java</th><th>C++</th></tr>
+  <tr><td>Keywords</td><td>25</td><td>35 (soft)</td><td>50</td><td>~90</td></tr>
+  <tr><td>Inheritance</td><td>none (composition)</td><td>multiple inheritance via MRO</td><td>single + interfaces</td><td>multiple inheritance</td></tr>
+  <tr><td>Generics</td><td>1.18+ (constrained)</td><td>dynamic</td><td>erased, with wildcards</td><td>templates (Turing-complete)</td></tr>
+  <tr><td>Error handling</td><td>return values</td><td>exceptions</td><td>checked exceptions</td><td>exceptions</td></tr>
+  <tr><td>Build system</td><td>built-in (<code>go build</code>)</td><td>pip / poetry / uv / etc.</td><td>Maven / Gradle</td><td>CMake / Make / …</td></tr>
+  <tr><td>Package manager</td><td>built-in (<code>go get</code>)</td><td>multiple, fragmented</td><td>Maven Central / Gradle</td><td>Conan / vcpkg / many</td></tr>
+  <tr><td>Whitespace</td><td><code>gofmt</code> (no choice)</td><td>PEP 8 (guideline)</td><td>no standard</td><td>no standard</td></tr>
+</table>
+
+<p>Go picks one way to do each of these and <em>makes it the
+default</em>. No <code>if err != nil</code> debate about which
+error-handling library; the language decides. No formatting war;
+<code>gofmt</code> decides. This is the part people love or hate.</p>
+
+<h2>The honest case for "it's hard"</h2>
+
+<p>There are a few things in Go that are <em>actually</em> a bit
+hard, especially coming from other languages:</p>
+
+<ol>
+  <li><strong>Pointers without pointer arithmetic.</strong> Covered
+    in lessons 3-4 of this series.</li>
+  <li><strong>Interfaces are implicit.</strong> A type satisfies an
+    interface by having the methods; there's no <code>implements</code>
+    keyword. The compiler catches the broken case, but you can't
+    tell from reading a type that it satisfies a given interface
+    without looking at the methods.</li>
+  <li><strong>Error handling verbosity.</strong> <code>if err != nil</code>
+    on every call site. It gets old. Linters help (you can ignore
+    them).</li>
+  <li><strong>No operator overloading.</strong> You can't make
+    <code>+</code> mean something for your custom numeric type.
+    The maintainers think this is a feature; some users think
+    it's a loss.</li>
+</ol>
+
+<p>But notice: the things on this list are <em>absences</em>. The
+language is small on purpose. Once you know what it has, you know
+the whole language. That's the trade-off Go makes.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">How many keywords does the Go language have?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The current spec lists 25 reserved words. Compare with C (~32 reserved + many contextual), Java (50), or C++ (~90). Go is deliberately small.">25</button>
+    <button class="opt" data-value="b" data-why="That's roughly the count for Java. Go's count is closer to 25.">~50</button>
+    <button class="opt" data-value="c" data-why="That's C++-adjacent, or what people expect from a "real" systems language. Go is smaller than that.">~90</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">A Go method has a "receiver" instead of a "self/this" parameter. What does that give you?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Receivers are explicit, not hidden. There's no `this` magic.">The receiver is just like Python's self — implicit and hidden</button>
+    <button class="opt" data-value="b" data-why="It is named explicitly in the method signature, like any other parameter.">It has to be a pointer (you can never have a value receiver)</button>
+    <button class="opt" data-value="c" data-why="Because the receiver is an ordinary parameter, you can name it anything, choose its type, and even attach methods to types you don't own (e.g. you can give `int` a method).">The receiver is an ordinary parameter — name it anything, choose its type, attach methods to types you don't own</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">What's the deliberate Go design choice for error handling?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="No exceptions exist in Go. There's no `raise` and no `try`.">Exceptions, like Java, but with a different keyword</button>
+    <button class="opt" data-value="b" data-why="Errors are ordinary values returned alongside the result. You handle them at the call site with `if err != nil`. Verbose, but explicit.">Errors are values returned from functions, handled at the call site</button>
+    <button class="opt" data-value="c" data-why="That's not a Go thing — it's a different language.">Implicit error propagation via monads</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-whole-language.html">Next: The whole language →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me the official Go tour — the one
+    Rob Pike wrote", or "what's a feature from my language X that
+    simply doesn't exist in Go and how do I do the equivalent?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

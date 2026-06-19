@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L3 · Pointers without arithmetic — Go syntax and pointers</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="02-whole-language.html">← The whole language</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 3 of 4</span>
+  <a href="04-common-confusions.html">Next: Common confusions →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 03 · Pointers</div>
+  <h1>Pointers without arithmetic</h1>
+  <p class="lede">Go pointers are addresses you can read through and
+  pass around. You can't add to them, can't subtract, can't index
+  them. This one restriction removes the entire class of bugs C and
+  C++ have spent decades teaching us about, and the language pays
+  you back by giving you the parts of pointers that actually matter.</p>
+</header>
+
+<p>If you have used C or C++: forget everything about pointer
+arithmetic. If you have used Java or Python: you already think
+about references; pointers in Go are like references with one
+extra piece of syntax (<code>*</code>). If you have used Rust:
+Go pointers are non-owning, non-borrow-checked references; no
+lifetimes, no move semantics.</p>
+
+<h2>The two operators</h2>
+
+<p>There are exactly two pointer operators. Memorize them.</p>
+
+<table class="trace">
+  <tr><th>Operator</th><th>Type</th><th>Effect</th></tr>
+  <tr><td><code>&amp;x</code></td><td>address-of</td><td>takes the address of <code>x</code>; produces a <code>*T</code></td></tr>
+  <tr><td><code>*p</code></td><td>dereference</td><td>follows the address in <code>p</code>; produces the value <code>T</code> behind it</td></tr>
+</table>
+
+<p>That's it. No <code>+</code>, no <code>-</code>, no
+<code>[]</code>, no <code>-&gt;</code> (use <code>.</code> on any
+pointer, Go auto-dereferences for you &mdash; covered in the
+<a href="../../topics/19th-june-go-structs-and-pointers/02-pointers-to-structs.html">pointers series</a>).</p>
+
+<h2>What you can do with a Go pointer</h2>
+
+<pre>x := <span class="n">42</span>
+p := &amp;x              <span class="c">// p is *int, points at x</span>
+<span class="v">fmt</span>.<span class="v">Println</span>(<span class="o">*</span>p)   <span class="c">// 42 — read through the pointer</span>
+<span class="o">*</span>p = <span class="n">100</span>             <span class="c">// write through the pointer</span>
+<span class="v">fmt</span>.<span class="v">Println</span>(x)      <span class="c">// 100 — same memory</span></pre>
+
+<p>That's the entire pointer surface. The only things you can do
+with a <code>*T</code>:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>Read the pointed-to value (<code>*p</code>)</strong><p>Returns a copy of the value. You can also use the
+      shorthand <code>p.Field</code>, which Go auto-dereferences for
+      you.</p></div></div>
+  <div class="step"><div class="body"><strong>Write through the pointer (<code>*p = …</code>)</strong><p>The change is visible through every other reference to
+      that same address.</p></div></div>
+  <div class="step"><div class="body"><strong>Pass the pointer around</strong><p>Function parameters, slice elements, map values, struct
+      fields &mdash; all of them can hold <code>*T</code>. The
+      receiver of a method can be <code>*T</code>.</p></div></div>
+  <div class="step"><div class="body"><strong>Compare to nil</strong><p><code>p == nil</code> is true iff the pointer is the zero
+      value. A nil pointer is the only "invalid" pointer &mdash;
+      dereferencing it panics.</p></div></div>
+</div>
+
+<h2>What you cannot do</h2>
+
+<p>Removing these is the entire point of Go's pointer design.</p>
+
+<div class="compare">
+  <div class="col bad">
+    <h4>Pointer arithmetic</h4>
+    <pre style="font-size:13px; margin:8px 0 0;">p := &amp;x
+p++            <span class="c">// ✗ compile error</span>
+p = p + <span class="n">1</span>      <span class="c">// ✗ compile error</span>
+p[<span class="n">0</span>]          <span class="c">// ✗ compile error</span></pre>
+    <p style="font-size:14px; margin:8px 0 0;">You can't move a pointer through memory. If you
+    want to walk a slice, walk the slice (<code>for i, v := range s</code>).
+    The slice itself knows its bounds; you don't.</p>
+  </div>
+  <div class="col bad">
+    <h4>Pointer-to-pointer (mostly)</h4>
+    <pre style="font-size:13px; margin:8px 0 0;"><span class="k">var</span> pp <span class="o">**</span><span class="t">int</span>  <span class="c">// legal but a smell</span></pre>
+    <p style="font-size:14px; margin:8px 0 0;">Possible, but almost always a sign of confused
+    design. If you think you need a pointer to a pointer, you
+    probably need a struct.</p>
+  </div>
+</div>
+
+<div class="callout">
+<strong>The entire C++ &quot;iterator invalidation&quot; problem
+class doesn't exist in Go.</strong> Slices and maps have value
+semantics (the header is copied, the backing array is shared);
+you can't get a pointer to a slice element and then resize the
+slice and have the pointer dangle &mdash; because the slice
+header is the only thing you'd be moving, and pointers to slice
+elements point at the backing array, which is stable. This is a
+giant category of bug that simply doesn't happen.
+</div>
+
+<h2>Garbage collection is the unspoken part</h2>
+
+<p>Go pointers are <em>safe</em> the way Java references are safe.
+You don't <code>free</code> them. You don't pair <code>malloc</code>
+with <code>free</code>. You don't track ownership. The garbage
+collector (a concurrent, tri-color mark-sweep collector since Go
+1.5) figures out when nothing points at the value anymore and
+reclaims the memory.</p>
+
+<p>What this means in practice:</p>
+
+<ul>
+  <li>You <em>can</em> return a pointer to a local variable
+    &mdash; Go's escape analysis moves the value to the heap
+    automatically.</li>
+  <li>You <em>can</em> share pointers across goroutines &mdash; the
+    runtime handles synchronization <em>of the runtime</em> (you
+    still need a mutex for your data).</li>
+  <li>You <em>cannot</em> use <code>uintptr</code> to do
+    arithmetic on a pointer address and expect it to be safe &mdash;
+    the GC may have moved the object. (There's a <code>unsafe</code>
+    package for this; use it carefully.)</li>
+</ul>
+
+<h2>The "is it nil?" dance</h2>
+
+<p>A nil pointer is the closest thing Go has to a "null" object.
+The convention for handling it:</p>
+
+<pre><span class="k">func</span> <span class="v">UserByID</span>(id <span class="t">int</span>) (<span class="o">*</span><span class="t">User</span>, <span class="t">error</span>) {
+    <span class="c">// ...</span>
+    <span class="k">if</span> !<span class="v">found</span> {
+        <span class="k">return</span> <span class="k">nil</span>, <span class="t">ErrNotFound</span>      <span class="c">// nil + error</span>
+    }
+    <span class="k">return</span> &amp;u, <span class="k">nil</span>                          <span class="c">// non-nil + nil error</span>
+}
+
+<span class="c">// caller</span>
+u, err := <span class="v">UserByID</span>(<span class="n">42</span>)
+<span class="k">if</span> err != <span class="k">nil</span> { <span class="k">return</span> err }
+<span class="k">if</span> u == <span class="k">nil</span> { <span class="c">/* defensive — usually unreachable */</span> }
+<span class="v">fmt</span>.<span class="v">Println</span>(u.Name)</pre>
+
+<div class="callout warn">
+<strong>The defensive <code>u == nil</code> check is usually
+unreachable.</strong> The convention is "if err is nil, the other
+return values are usable." Linters like <code>errcheck</code> and
+<code>staticcheck</code> can verify this, but the human
+convention is: <em>always check <code>err</code> first; never
+re-check the values for nil</em>. The two are tied together.
+</div>
+
+<h2>What pointers are <em>for</em> in Go</h2>
+
+<p>Three legitimate reasons to use a pointer:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>Mutation</strong><p>The function needs to change something the caller can see.
+        <code>func (c *Counter) Inc() { c.n++ }</code>. Without
+        the pointer, the receiver is a copy and the change is
+        lost.</p></div></div>
+  <div class="step"><div class="body"><strong>Performance</strong><p>The struct is large. Passing a 1KB struct by value
+        copies 1KB. Passing a pointer copies 8 bytes. (For most
+        purposes this doesn't matter; the Go compiler is good at
+        not copying what it doesn't have to.)</p></div></div>
+  <div class="step"><div class="body"><strong>Identity / nil-ability</strong><p>You need to represent "no value" distinctly from "zero
+        value." A <code>*User</code> can be nil (no user found);
+        a <code>User</code> is always a User.</p></div></div>
+</div>
+
+<p>If your reason isn't one of these, you probably don't need a
+pointer. Pass by value, return by value. The simpler code is the
+correct code.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">What happens if you write <code>p + 1</code> where <code>p</code> is a <code>*int</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Go refuses to compile pointer arithmetic. The error is at build time, never at runtime.">Compile error — Go has no pointer arithmetic</button>
+    <button class="opt" data-value="b" data-why="There's no `+` operator on `*int` in Go. The compiler rejects it.">It advances the pointer by one int's worth of bytes (C-style)</button>
+    <button class="opt" data-value="c" data-why="Adding an integer to a pointer is a compile error in Go.">It returns nil (the language refuses)</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">A function returns <code>(*User, error)</code>. The convention is: if err is non-nil, what about the <code>*User</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Always checking both is verbose and the linter community considers it a smell. Trust the err.">It may be either — you must check both</button>
+    <button class="opt" data-value="b" data-why="The convention is the opposite: on error, other returns are unusable. On nil error, other returns are valid.">It is guaranteed to be a valid User (non-nil)</button>
+    <button class="opt" data-value="c" data-why="The convention is "if err is non-nil, treat other returns as unusable (they may be nil or zero). If err is nil, other returns are valid." Callers check err first.">It is undefined / may be nil — the caller must check err first and only use the *User when err is nil</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">You can return a pointer to a local variable in Go. How?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Go's escape analysis is what makes this safe. You don't have to do anything.">You can't — it would be a use-after-free</button>
+    <button class="opt" data-value="b" data-why="The Go compiler does escape analysis: if a pointer could outlive the function, the value is allocated on the heap automatically. The caller gets a pointer to a heap-allocated value.">Go's escape analysis moves the value to the heap automatically</button>
+    <button class="opt" data-value="c" data-why="It's automatic in Go; you don't have to use any keyword.">You must mark the variable with the `escape` keyword</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-whole-language.html">← The whole language</a>
+    <a href="04-common-confusions.html">Next: Common confusions →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me what `escape analysis` prints
+    for a function that returns &amp;local", or "what does
+    <code>unsafe.Pointer</code> do and when should I use it?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

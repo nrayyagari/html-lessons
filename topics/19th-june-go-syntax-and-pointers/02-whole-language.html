@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L2 · The whole language — Go syntax and pointers</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="01-is-it-hard.html">← Is it hard?</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 2 of 4</span>
+  <a href="03-pointers-without-arithmetic.html">Next: Pointers →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 02 · The whole language</div>
+  <h1>The whole language in one page</h1>
+  <p class="lede">If you remember the 25 keywords, the four statement
+  forms, and the way types work, you've covered the entire language
+  surface. The rest is just a tour of the standard library.</p>
+</header>
+
+<p>Go's grammar is small enough to learn in an afternoon. This
+lesson is the whole thing &mdash; not exhaustive, but enough that
+you'll recognize every new thing you see as one of the patterns
+below.</p>
+
+<h2>The 25 keywords</h2>
+
+<table class="trace">
+  <tr><th>Group</th><th>Keywords</th></tr>
+  <tr><td>Declarations</td><td><code>package</code>, <code>import</code>, <code>const</code>, <code>var</code>, <code>type</code>, <code>func</code></td></tr>
+  <tr><td>Composite types</td><td><code>struct</code>, <code>interface</code>, <code>map</code>, <code>chan</code></td></tr>
+  <tr><td>Control flow</td><td><code>if</code>, <code>else</code>, <code>for</code>, <code>range</code>, <code>switch</code>, <code>case</code>, <code>default</code>, <code>break</code>, <code>continue</code>, <code>fallthrough</code>, <code>goto</code>, <code>return</code></td></tr>
+  <tr><td>Concurrency</td><td><code>go</code>, <code>select</code>, <code>defer</code></td></tr>
+  <tr><td>Misc</td><td><code>nil</code></td></tr>
+</table>
+
+<p>That's it. Notice: no <code>while</code> (use <code>for</code>),
+no <code>do</code>, no <code>enum</code>, no <code>class</code>,
+no <code>extends</code>, no <code>implements</code>, no
+<code>new</code> (well, it's predeclared, not a keyword), no
+<code>try</code> / <code>catch</code>, no
+<code>public</code> / <code>private</code>.</p>
+
+<h2>Variables and types</h2>
+
+<p>Three ways to declare a value. Each has a place.</p>
+
+<pre><span class="c">// 1. var with explicit type — for zero values, package-level vars</span>
+<span class="k">var</span> name <span class="t">string</span>      <span class="c">// ""</span>
+<span class="k">var</span> n   <span class="t">int</span>         <span class="c">// 0</span>
+<span class="k">var</span> ok  <span class="t">bool</span>        <span class="c">// false</span>
+
+<span class="c">// 2. var with inferred type — when the right-hand side makes it obvious</span>
+<span class="k">var</span> name = <span class="s">"Naveen"</span>
+<span class="k">var</span> n   = <span class="n">42</span>
+
+<span class="c">// 3. := — short declaration. Inside functions only.</span>
+name := <span class="s">"Naveen"</span>      <span class="c">// preferred for local vars with an initializer</span>
+n   := <span class="n">42</span>
+
+<span class="c">// 4. const — only for compile-time constants</span>
+<span class="k">const</span> maxRetries = <span class="n">3</span>
+<span class="k">const</span> greeting = <span class="s">"hello"</span></pre>
+
+<p>Type inference happens in 2 and 3. The <code>:=</code> form is
+the most common in real code, but you can't use it at package scope
+(use <code>var</code> there).</p>
+
+<h2>The four statement forms</h2>
+
+<p>Almost every Go statement is one of these four. The whole grammar
+of statements is on this page.</p>
+
+<h3>1. Assignment</h3>
+
+<pre>x = <span class="n">1</span>                  <span class="c">// simple</span>
+x, y = y, x          <span class="c">// tuple (used in swaps, returns)</span>
+x++                  <span class="c">// post-increment only — no x + 1, no ++x</span>
+p.Field = <span class="n">42</span>          <span class="c">// field assignment</span></pre>
+
+<div class="callout warn">
+<strong><code>++</code> is a statement, not an expression.</strong>
+You can't write <code>y := x++</code>. This is a small thing that
+annoys people coming from C. The reason: it makes the grammar
+unambiguous in one place where it was ambiguous in C.
+</div>
+
+<h3>2. <code>if</code> with optional initialization</h3>
+
+<pre><span class="k">if</span> x &gt; <span class="n">0</span> {
+    <span class="c">// ...</span>
+}
+
+<span class="c">// optional init statement; v is scoped to the if/else</span>
+<span class="k">if</span> v := <span class="v">compute</span>(); v &gt; <span class="n">0</span> {
+    <span class="c">// ...</span>
+} <span class="k">else if</span> v == <span class="n">0</span> {
+    <span class="c">// ...</span>
+} <span class="k">else</span> {
+    <span class="c">// ...</span>
+}</pre>
+
+<p>The init-statement form is what makes <code>if err != nil</code>
+idiomatic without a temporary leaking out:</p>
+
+<pre><span class="k">if</span> err := <span class="v">doThing</span>(); err != <span class="k">nil</span> {
+    <span class="k">return</span> err
+}</pre>
+
+<h3>3. <code>for</code> &mdash; the only loop</h3>
+
+<pre><span class="c">// 1. classic three-part</span>
+<span class="k">for</span> i := <span class="n">0</span>; i &lt; <span class="n">10</span>; i++ { ... }
+
+<span class="c">// 2. while-style</span>
+<span class="k">for</span> x &lt; <span class="n">100</span> { x *= <span class="n">2</span> }
+
+<span class="c">// 3. infinite</span>
+<span class="k">for</span> { ... }
+
+<span class="c">// 4. range over slice, map, string, channel</span>
+<span class="k">for</span> i, v := <span class="k">range</span> []<span class="t">int</span>{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>} { ... }
+<span class="k">for</span> k, v := <span class="k">range</span> m { ... }
+<span class="k">for</span> i, r := <span class="k">range</span> <span class="s">"hello"</span> { ... }   <span class="c">// r is the rune, i is the byte index</span>
+<span class="k">for</span> v := <span class="k">range</span> ch { ... }            <span class="c">// v is the channel value</span></pre>
+
+<p>Note there is no <code>while</code> keyword. The middle form
+<code>for x &lt; 100 { x *= 2 }</code> is the while loop. The infinite
+form is just <code>for { }</code>.</p>
+
+<h3>4. <code>switch</code> &mdash; the type-switch trick</h3>
+
+<pre><span class="c">// value switch</span>
+<span class="k">switch</span> x {
+<span class="k">case</span> <span class="n">1</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"one"</span>)
+<span class="k">case</span> <span class="n">2</span>, <span class="n">3</span>:                  <span class="c">// multiple values per case</span>
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"two or three"</span>)
+<span class="k">default</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"other"</span>)
+}
+
+<span class="c">// tagless switch — cleaner than a long if/else chain</span>
+<span class="k">switch</span> {
+<span class="k">case</span> x &lt; <span class="n">0</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"negative"</span>)
+<span class="k">case</span> x == <span class="n">0</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"zero"</span>)
+<span class="k">default</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"positive"</span>)
+}
+
+<span class="c">// type switch — the killer feature</span>
+<span class="k">switch</span> v := i.(<span class="k">type</span>) {
+<span class="k">case</span> <span class="t">int</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"int:"</span>, v)
+<span class="k">case</span> <span class="t">string</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"string:"</span>, v)
+<span class="k">default</span>:
+    <span class="v">fmt</span>.<span class="v">Println</span>(<span class="s">"unknown"</span>)
+}</pre>
+
+<div class="callout">
+<strong>Cases don't fall through by default.</strong> Unlike C,
+Go's <code>switch</code> breaks after each matching case
+automatically. You don't need a <code>break</code>. The
+<code>fallthrough</code> keyword exists if you want C-style fall
+through, but it's rare and almost always a smell.
+</div>
+
+<h2>Types, in summary</h2>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Value types</h4>
+    <p><code>bool</code>, numeric (<code>int</code>/<code>int8</code>/.../<code>uint64</code>,
+    <code>float32</code>/<code>float64</code>, <code>complex64</code>/<code>complex128</code>),
+    <code>string</code>, arrays (<code>[N]T</code>), structs
+    (<code>struct{...}</code>). All copied on assignment and
+    function call.</p>
+  </div>
+  <div class="col good">
+    <h4>Reference types</h4>
+    <p>Pointers (<code>*T</code>), slices (<code>[]T</code>), maps
+    (<code>map[K]V</code>), channels (<code>chan T</code>), functions
+    (<code>func(...)...</code>), interfaces (<code>interface{}</code>).
+    Hold a header that points at the underlying data. Assignment
+    shares the backing store.</p>
+  </div>
+</div>
+
+<p>Go doesn't have a "class" system; it has <em>types</em>. Every
+named type is a first-class value. You can attach methods to any
+type, including types from other packages (within the same
+package you can't override, but you can extend).</p>
+
+<h2>One more thing: <code>defer</code></h2>
+
+<p><code>defer</code> is the single Go feature that has no analog
+in most other languages. The deferred call runs when the enclosing
+function returns &mdash; arguments are evaluated immediately, the
+call happens at return time.</p>
+
+<pre><span class="k">func</span> <span class="v">readFile</span>(path <span class="t">string</span>) <span class="t">error</span> {
+    f, err := <span class="v">os</span>.<span class="v">Open</span>(path)
+    <span class="k">if</span> err != <span class="k">nil</span> { <span class="k">return</span> err }
+    <span class="k">defer</span> f.<span class="v">Close</span>()            <span class="c">// runs when readFile returns, no matter how</span>
+
+    <span class="c">// ... do stuff with f ...</span>
+    <span class="k">return</span> <span class="k">nil</span>
+}</pre>
+
+<p>The pattern: <strong>acquire resource → defer release</strong>.
+Pairs naturally with the early-return error style. No "finally"
+keyword, no RAII.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You want a long-running loop that exits when a condition becomes false. What's the syntax?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="`for cond { }` is the Go while loop. The C-style three-part form is also valid, but the condition-only form is the idiomatic while.">for x < 100 { x *= 2 }</button>
+    <button class="opt" data-value="b" data-why="Go has no `while` keyword. The condition-only `for` form is the while loop.">while x < 100 { x *= 2 }</button>
+    <button class="opt" data-value="c" data-why="`do { } while` doesn't exist in Go. You have to use `for` with a break.">do { x *= 2 } while (x < 100)</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">What's special about a type switch?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="A type switch works on interface values; each case names a concrete type to match against.">It's a switch on the value of a variable, same as a value switch</button>
+    <button class="opt" data-value="b" data-why="A type switch is the one place in Go where a runtime type check is built into the language.">It's the only way to do reflection in Go</button>
+    <button class="opt" data-value="c" data-why="`switch v := i.(type)` walks the dynamic type of an interface and binds a typed `v` per case. It's the idiomatic way to handle an interface{} value.">It matches the dynamic type of an interface value and binds a typed `v` per case</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">What does <code>defer f.Close()</code> do?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Arguments are evaluated at the defer site, but the call itself is deferred until the function returns.">It closes f immediately and frees the resource</button>
+    <button class="opt" data-value="b" data-why="The arguments (here, f) are captured now; the call to f.Close() runs when the enclosing function returns. Pairs naturally with the early-return error style.">It captures the resource now and runs f.Close() when the enclosing function returns</button>
+    <button class="opt" data-value="c" data-why="That's not what defer does. There's no built-in "with" statement in Go.">It puts f in a "with" block that auto-closes at the end of the block</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="01-is-it-hard.html">← Is it hard?</a>
+    <a href="03-pointers-without-arithmetic.html">Next: Pointers →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me the gofmt'd version of a
+    function I wrote", or "what's the difference between
+    <code>defer f.Close()</code> and <code>defer func() { f.Close() }()</code>?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L2 · Hierarchy — Azure RG vs GCP projects</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="01-mental-model.html">← Mental model</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 2 of 4</span>
+  <a href="03-iam.html">Next: IAM →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 02 · Hierarchy</div>
+  <h1>Flat vs nested: the structural difference</h1>
+  <p class="lede">Azure's grouping is one level deep. GCP's is a tree.
+  The shape of the hierarchy changes how IAM, billing, and policy
+  inherit &mdash; and that is what makes multi-team, multi-environment
+  setups work differently on the two clouds.</p>
+</header>
+
+<p>Once you have more than a handful of groups, you need a way to
+organize <em>the groups themselves</em>. The two clouds picked
+opposite answers: Azure leaves it to a separate, optional feature
+(Management Groups). GCP bakes a tree into the resource model.</p>
+
+<h2>Azure: flat + Management Groups (optional)</h2>
+
+<p>Inside a subscription, every Resource Group is a peer. To get
+hierarchy, you create a Management Group tree that lives
+<em>above</em> subscriptions:</p>
+
+<div class="hierarchy">
+  <div class="node kind-CRD">
+    <strong>Tenant Root Group (auto)</strong>
+    <small>one per Azure AD tenant</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-resource">
+    <strong>MG: "Platform"</strong>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node kind-resource" style="min-width:140px;">
+      <strong>MG: "Engineering"</strong>
+    </div>
+    <div class="node kind-resource" style="min-width:140px;">
+      <strong>MG: "Data"</strong>
+    </div>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node kind-secret" style="min-width:140px;">
+      <strong>Sub: prod-payments</strong>
+    </div>
+    <div class="node kind-secret" style="min-width:140px;">
+      <strong>Sub: prod-search</strong>
+    </div>
+    <div class="node kind-secret" style="min-width:140px;">
+      <strong>Sub: data-warehouse</strong>
+    </div>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node" style="border-color:var(--fg-dim); min-width:140px;"><strong>RG: app</strong></div>
+    <div class="node" style="border-color:var(--fg-dim); min-width:140px;"><strong>RG: data</strong></div>
+    <div class="node" style="border-color:var(--fg-dim); min-width:140px;"><strong>RG: net</strong></div>
+    <div class="node" style="border-color:var(--fg-dim); min-width:140px;"><strong>RG: jobs</strong></div>
+  </div>
+</div>
+
+<p>Notice: RGs (the lowest level) are flat siblings inside their
+subscription. Hierarchy is layered on top via Management Groups,
+which most small teams never create.</p>
+
+<div class="callout">
+<strong>Why so many teams skip Management Groups.</strong> If you have
+one subscription, or one subscription per environment (prod / stage /
+dev), the MG layer is redundant &mdash; the subscription boundary
+already does the job. MGs shine when you have 5+ subscriptions that
+need shared governance (e.g. "all prod subscriptions must deploy
+only to these 3 regions").
+</div>
+
+<h2>GCP: projects live in a folder tree, by default</h2>
+
+<p>Every GCP project is created inside a parent. The default parent
+for new orgs is the organization root, but you can nest projects
+under folders up to ~8 levels deep:</p>
+
+<div class="hierarchy">
+  <div class="node kind-CRD">
+    <strong>Organization</strong>
+    <small>one per Workspace</small>
+  </div>
+  <div class="arrow"></div>
+  <div class="node kind-resource">
+    <strong>Folder: "Engineering"</strong>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node kind-resource" style="min-width:140px;">
+      <strong>Folder: "Payments"</strong>
+    </div>
+    <div class="node kind-resource" style="min-width:140px;">
+      <strong>Folder: "Search"</strong>
+    </div>
+  </div>
+  <div class="arrow"></div>
+  <div class="row">
+    <div class="node kind-secret" style="min-width:140px;">
+      <strong>Project: payments-prod</strong>
+    </div>
+    <div class="node kind-secret" style="min-width:140px;">
+      <strong>Project: payments-dev</strong>
+    </div>
+    <div class="node kind-secret" style="min-width:140px;">
+      <strong>Project: search-prod</strong>
+    </div>
+  </div>
+</div>
+
+<p>Compared to Azure, the project (the smallest unit) is the
+<em>leaf</em> of a tree, not a flat peer. The folders let you group
+projects by team, by environment, by business unit, by anything &mdash;
+without inventing a new layer like MGs.</p>
+
+<div class="callout gold">
+<strong>GCP projects can also live directly under the Org.</strong> A
+project doesn't <em>have</em> to be inside a folder. You can create
+"orphans" directly under the organization root, which is the
+default for new projects in small orgs. Folders are purely
+organizational sugar.
+</div>
+
+<h2>What the extra levels buy you</h2>
+
+<p>Hierarchy is most useful for two things: IAM inheritance and
+billing rollup. Let's see both.</p>
+
+<h3>IAM inheritance</h3>
+
+<p>A role granted at the Org level is inherited by every folder,
+project, and resource under it. Grant a role at the "Engineering"
+folder and every project in it picks it up. Grant it at the Org
+root and every project in the org picks it up.</p>
+
+<p>Azure works the same way at the MG and subscription levels &mdash;
+the same inheritance rules apply, you just have to opt into the
+extra levels. The mental model is identical; the difference is
+whether the levels are pre-baked (GCP) or you-build-them (Azure).</p>
+
+<h3>Billing rollup</h3>
+
+<p>GCP billing accounts are a separate hierarchy from folders. A
+project belongs to exactly one billing account; a billing account
+can have many projects. Folders are for <em>organization</em>,
+billing accounts are for <em>money</em>. They're independent
+axes that you wire together.</p>
+
+<p>Azure has a similar split: subscriptions are both a billing
+boundary and an IAM boundary. You don't have to choose between
+them &mdash; they're the same unit.</p>
+
+<div class="callout">
+<strong>When you switch clouds, watch this.</strong> On Azure, the
+subscription is both "where it bills from" and "where IAM is scoped."
+On GCP, those are independent. A common porting mistake is to
+assume a GCP project maps 1:1 to an Azure subscription &mdash; it's
+usually a better match for an Azure RG + subscription, or for
+multiple RGs inside one subscription.
+</div>
+
+<h2>Practical layout patterns</h2>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Azure: subscription-per-environment</h4>
+    <p>One subscription for <code>prod</code>, one for
+    <code>nonprod</code>. RGs inside each subscription are per
+    application. IAM is per-RG, billing is per-subscription, delete
+    a nonprod subscription to clean up an environment.</p>
+  </div>
+  <div class="col good">
+    <h4>GCP: folder-per-environment</h4>
+    <p>One folder for <code>prod</code>, one for <code>nonprod</code>,
+    each containing the relevant projects. IAM is per-project (or
+    per-folder if you want inheritance). Billing is per-project
+    against one billing account, with budget alerts per folder.</p>
+  </div>
+</div>
+
+<p>Same outcome, different mechanism. Both work; pick the one that
+matches your team's mental model.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">An Azure subscription's Resource Groups are &mdash; in terms of hierarchy &mdash;…</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Inside a single subscription, RGs are flat siblings. Hierarchy is layered on top via Management Groups, which is a separate, optional feature.">Flat peers inside the subscription; hierarchy is layered on via Management Groups</button>
+    <button class="opt" data-value="b" data-why="RGs can be nested in Azure in some ways (via ARM deployment stacks and nested templates), but the resource itself belongs to exactly one RG.">Nested inside other RGs, like folders</button>
+    <button class="opt" data-value="c" data-why="RGs are part of a subscription, not a tenant. Tenants are a higher-level boundary (Azure AD).">Members of the Azure AD tenant</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">In GCP, which statement about projects and folders is true?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Projects can also live directly under the organization root. The folder layer is optional organizational sugar.">Projects must always be inside a folder</button>
+    <button class="opt" data-value="b" data-why="It's the other way around: projects are the leaves, folders are intermediate nodes. Resources inside a project (VMs, buckets) don't have their own 'sub-project'.">Folders must always be inside a project</button>
+    <button class="opt" data-value="c" data-why="Projects are the leaves of the org/folder tree. They can be nested under folders, or sit directly under the Org root.">Projects are the leaves; folders are intermediate; projects can also be direct children of the Org</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">In GCP, where does billing get attached?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Folder organization is independent of billing. Folders are for IAM and policy, not money.">On the folder, and inherited by every project under it</button>
+    <button class="opt" data-value="b" data-why="A billing account holds many projects. Folders are for organization; billing accounts are for money. They're separate, orthogonal axes.">On a separate billing account; a project belongs to exactly one</button>
+    <button class="opt" data-value="c" data-why="The org root is a permission/policy scope, not a billing scope.">On the organization root, with every project sharing it</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="01-mental-model.html">← Mental model</a>
+    <a href="03-iam.html">Next: IAM →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me an Azure Management Group
+    Terraform example", or "what's the GCP equivalent of an Azure
+    Policy initiative?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

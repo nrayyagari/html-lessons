@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L4 · Common confusions — Go syntax and pointers</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="03-pointers-without-arithmetic.html">← Pointers</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 4 of 4</span>
+  <a href="../../index.html">⌂ All topics</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 04 · The gotchas</div>
+  <h1>Common confusions, demystified</h1>
+  <p class="lede">Six things that bite everyone at least once. Read
+  this once before writing production Go and you'll save yourself
+  hours of debugging later.</p>
+</header>
+
+<h2>1. Range loop variable capture</h2>
+
+<p>This one bites every Go developer once. The loop variable is
+<em>reused</em> across iterations, so capturing it in a closure
+captures the same variable each time.</p>
+
+<pre><span class="k">var</span> funcs []<span class="k">func</span>()
+<span class="k">for</span> _, v := <span class="k">range</span> []<span class="t">int</span>{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>} {
+    funcs = <span class="v">append</span>(funcs, <span class="k">func</span>() { <span class="v">fmt</span>.<span class="v">Println</span>(v) })
+}
+<span class="k">for</span> _, f := <span class="k">range</span> funcs { f() }   <span class="c">// prints 3, 3, 3 — not 1, 2, 3!</span></pre>
+
+<p>The fix in pre-1.22 Go: shadow the variable inside the loop.</p>
+
+<pre><span class="k">for</span> _, v := <span class="k">range</span> []<span class="t">int</span>{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>} {
+    v := v                          <span class="c">// new variable per iteration</span>
+    funcs = <span class="v">append</span>(funcs, <span class="k">func</span>() { <span class="v">fmt</span>.<span class="v">Println</span>(v) })
+}</pre>
+
+<p>Go 1.22 (Feb 2024) fixed this &mdash; the loop variable is now
+<em>per-iteration</em> by default. If you're on 1.22+, this gotcha
+is gone. If you support older Go, shadow.</p>
+
+<h2>2. Shadowing with <code>:=</code></h2>
+
+<p><code>:=</code> declares a new variable in the current scope
+<em>if at least one of the names is new</em>. It doesn't fail if
+some of the names already exist in an outer scope &mdash; it
+silently shadows them.</p>
+
+<pre><span class="k">var</span> x <span class="t">int</span> = <span class="n">1</span>
+<span class="k">if</span> <span class="v">compute</span>() {
+    x := <span class="n">2</span>            <span class="c">// new x, scoped to this if-block</span>
+    <span class="v">fmt</span>.<span class="v">Println</span>(x)   <span class="c">// 2</span>
+}
+<span class="v">fmt</span>.<span class="v">Println</span>(x)       <span class="c">// 1</span></pre>
+
+<p>This is fine when intentional. It bites when you meant to assign
+to the outer <code>x</code> but accidentally wrote <code>:=</code>
+in a nested scope. Tools like <code>shadow</code> (from
+golang.org/x/tools) and <code>govet</code> flag this.</p>
+
+<div class="callout warn">
+<strong>Rule of thumb.</strong> Use <code>=</code> for assignment,
+<code>:=</code> for declaration. If you find yourself writing
+<code>x := something</code> in a place where <code>x</code> already
+exists in an outer scope, you almost certainly meant <code>=</code>.
+</div>
+
+<h2>3. Nil map vs empty map</h2>
+
+<p>You can read from a nil map (returns the zero value). You
+<em>cannot</em> write to a nil map (it panics at runtime).</p>
+
+<pre><span class="k">var</span> m <span class="k">map</span>[<span class="t">string</span>]<span class="t">int</span>     <span class="c">// m == nil</span>
+<span class="v">fmt</span>.<span class="v">Println</span>(m[<span class="s">"x"</span>])  <span class="c">// 0 — read works, returns zero value</span>
+m[<span class="s">"x"</span>] = <span class="n">1</span>           <span class="c">// PANIC: assignment to entry in nil map</span>
+
+<span class="m">m</span> := <span class="k">map</span>[<span class="t">string</span>]<span class="t">int</span>{}   <span class="c">// explicit empty map — write works</span></pre>
+
+<p>The same rule applies to nil slices: <code>append</code> works,
+index assignment panics. Both are the
+"zero value is usable, but only in a read-only way" pattern.</p>
+
+<h2>4. Slices share the backing array</h2>
+
+<p>A slice is a header: <code>{ptr, len, cap}</code>. When you
+<code>append</code> and the capacity is exceeded, Go allocates a
+new backing array and the header points at it. Until then, append
+mutates the original array.</p>
+
+<pre>a := []<span class="t">int</span>{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>}
+b := a[:<span class="n">2</span>]               <span class="c">// b shares the same backing array as a</span>
+b[<span class="n">0</span>] = <span class="n">99</span>
+<span class="v">fmt</span>.<span class="v">Println</span>(a)            <span class="c">// [99 2 3] — a is affected</span></pre>
+
+<p>The "gotcha" cases:</p>
+
+<div class="compare">
+  <div class="col bad">
+    <h4>Surprising</h4>
+    <pre style="font-size:13px; margin:8px 0 0;">a := []<span class="t">int</span>{<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>}
+b := a
+b[<span class="n">0</span>] = <span class="n">99</span>     <span class="c">// a is changed</span></pre>
+  </div>
+  <div class="col good">
+    <h4>Explicit copy</h4>
+    <pre style="font-size:13px; margin:8px 0 0;">a := []<span class="t">int</span>{<span class="n">1</span>,<span class="n">2</span>,<span class="n">3</span>}
+b := <span class="v">append</span>([]<span class="t">int</span>{}, a...)
+b[<span class="n">0</span>] = <span class="n">99</span>     <span class="c">// a is unchanged</span></pre>
+  </div>
+</div>
+
+<h2>5. Goroutine leaks</h2>
+
+<p>Unlike threads, goroutines have no built-in way to die. If you
+<code>go doSomething(ch)</code> and the receiver of <code>ch</code>
+stops reading, the goroutine blocks forever &mdash; and so does
+its memory.</p>
+
+<pre><span class="k">for</span> _, item := <span class="k">range</span> items {
+    <span class="k">go</span> <span class="k">func</span>() {
+        <span class="v">process</span>(item)        <span class="c">// `item` is shared (pre-1.22) — and we have no way to cancel</span>
+    }()
+}
+<span class="c">// nothing here waits for the goroutines; if process is slow, they pile up</span></pre>
+
+<p>Fix: use a context.</p>
+
+<pre>ctx, cancel := <span class="v">context</span>.<span class="v">WithCancel</span>(<span class="v">context</span>.<span class="v">Background</span>())
+<span class="k">defer</span> <span class="v">cancel</span>()
+
+<span class="k">for</span> _, item := <span class="k">range</span> items {
+    <span class="k">go</span> <span class="k">func</span>() {
+        <span class="k">select</span> {
+        <span class="k">case</span> &lt;-ctx.<span class="v">Done</span>(): <span class="k">return</span>
+        <span class="k">default</span>:         <span class="v">process</span>(item)
+        }
+    }()
+}</pre>
+
+<p>Every goroutine should have a path to exit. Linters like
+<code>go vet</code> and <code>staticcheck</code> can catch
+some patterns.</p>
+
+<h2>6. The "interfaces are nil" trap</h2>
+
+<p>An interface value is a pair: <code>(type, value)</code>. A
+typed nil pointer wrapped in an interface is <em>not</em> a nil
+interface. This is the single most common "why does my nil check
+fail" question in Go.</p>
+
+<pre><span class="k">type</span> <span class="t">Counter</span> <span class="k">struct</span>{ <span class="v">n</span> <span class="t">int</span> }
+<span class="k">func</span> <span class="o">*</span><span class="t">Counter</span> <span class="v">Inc</span>() { c.n++ }
+
+<span class="k">var</span> c <span class="o">*</span><span class="t">Counter</span> = <span class="k">nil</span>          <span class="c">// c is a nil *Counter</span>
+<span class="k">var</span> i <span class="t">Incr</span> = c                <span class="c">// i is (type=*Counter, value=nil) — not a nil interface!</span>
+<span class="v">fmt</span>.<span class="v">Println</span>(i == <span class="k">nil</span>)          <span class="c">// false</span>
+i.<span class="v">Inc</span>()                      <span class="c">// panic: nil pointer dereference</span></pre>
+
+<p>The fix: be explicit about the nil check at the boundary where
+you wrap the concrete value in the interface.</p>
+
+<pre><span class="k">var</span> c <span class="o">*</span><span class="t">Counter</span> = <span class="k">nil</span>
+<span class="k">if</span> c == <span class="k">nil</span> {
+    <span class="c">// return nil interface, not interface-wrapping-nil</span>
+    <span class="k">return</span> <span class="k">nil</span>
+}
+<span class="k">return</span> c                       <span class="c">// interface holds (type=*Counter, value=&amp;counter{})</span></pre>
+
+<div class="callout">
+<strong>The full rule.</strong> An interface is nil iff
+<em>both</em> the type and the value are nil. A typed nil
+(<code>var p *T = nil; var i I = p</code>) is non-nil because
+the type slot is filled. This is a design quirk, not a bug, but
+it catches everyone once.
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You write <code>var m map[string]int</code> and then <code>m["k"] = 1</code>. What happens?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Read from a nil map returns the zero value. Write to a nil map panics. Initialize with `m := map[string]int{}` or `make(map[string]int)` to be able to write.">Panic: assignment to entry in nil map</button>
+    <button class="opt" data-value="b" data-why="Read is allowed on a nil map (returns zero), but write is not. It's not silent — it's a panic.">It silently no-ops — you must use `make` to detect it</button>
+    <button class="opt" data-value="c" data-why="nil map writes panic, but you don't need to initialize — `var m = map[string]int{}` is also valid. Either way works.">Compile error — you must initialize with `make`</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">What happens to a backing array if you take a sub-slice <code>b := a[:2]</code> and write to <code>b[0]</code>?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Slices share the backing array by design. `b := a[:2]` is a view into a's backing memory.">a is unchanged — sub-slices are independent</button>
+    <button class="opt" data-value="b" data-why="A sub-slice is a view into the same backing array. Writing through b writes through a. This is a common source of bugs.">a is changed — sub-slices share the backing array</button>
+    <button class="opt" data-value="c" data-why="That's the same backing array as `b`, but only the first two elements are reachable from `a`'s view. The element at index 0 is in `a`'s range, so a sees the change.">Only the first element of a is changed</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">You create a goroutine that reads from a channel. The sender stops sending. What happens to the goroutine?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="A goroutine blocked on a channel receive never exits unless the channel is closed. The garbage collector can't reclaim its stack or locals while it's still running.">It's collected by the garbage collector</button>
+    <button class="opt" data-value="b" data-why="That's the standard advice for CPU-bound work, not blocked goroutines. A blocked goroutine isn't using CPU but is still consuming memory.">It panics with a stack overflow</button>
+    <button class="opt" data-value="c" data-why="A goroutine blocked on a channel receive never exits unless the channel is closed or the goroutine is otherwise unblocked. It leaks (stays in memory forever). Always give goroutines an exit path.">It blocks forever, holding its memory — a goroutine leak</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="03-pointers-without-arithmetic.html">← Pointers</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../../index.html">⌂ All topics</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me the staticcheck rules that
+    catch these gotchas", or "what's the canonical pattern for
+    cancelling a long-running goroutine pool?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

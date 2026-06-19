@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L1 · The mental model — Azure RG vs GCP projects</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="../../index.html">⌂ All topics</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 1 of 4</span>
+  <a href="02-hierarchy.html">Next: Hierarchy →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 01 · Foundations</div>
+  <h1>The mental model: containers for cloud resources</h1>
+  <p class="lede">Azure and GCP both let you group cloud resources into
+  named containers, but the two systems come at it from opposite
+  directions: one is flat, one is nested. Once you see the shape, the
+  rest of the differences fall out.</p>
+</header>
+
+<h2>What problem are they solving?</h2>
+
+<p>You have a subscription (Azure) or a billing account (GCP). Inside it,
+you can spin up dozens, hundreds, or thousands of resources &mdash;
+VMs, databases, storage accounts, functions. Without grouping, you
+have an unsorted list. Grouping solves four problems at once:</p>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>Billing boundary</strong><p>Sum the cost of everything in a group. Tag it to a team, project, or environment. Show me what this costs without
+      grepping the whole bill.</p></div></div>
+  <div class="step"><div class="body"><strong>Access boundary</strong><p>Grant "read everything in this group" to a team without giving them
+      access to the rest of the subscription. The group is the unit of
+      least-privilege.</p></div></div>
+  <div class="step"><div class="body"><strong>Lifecycle boundary</strong><p>Delete the group, delete everything in it. Useful for ephemeral
+      environments, dev sandboxes, decommissioned services.</p></div></div>
+  <div class="step"><div class="body"><strong>Policy / governance boundary</strong><p>Apply a policy (region constraints, allowed SKUs, required tags) to
+      the group and have it enforced for every resource inside.</p></div></div>
+</div>
+
+<p>Both clouds converged on this idea. The names are different, the
+shape of the hierarchy is different, but the four problems are the
+same.</p>
+
+<h2>The naming, side by side</h2>
+
+<div class="compare">
+  <div class="col good">
+    <div class="label">Azure</div>
+    <h4>Resource Group (RG)</h4>
+    <p>A flat container that lives directly inside a <strong>subscription</strong>.
+    One level of grouping. Resources belong to exactly one RG. An RG
+    can't contain another RG.</p>
+    <p style="margin-top:10px; font-size:14px; color:var(--fg-muted);">Naming rule: alphanumerics, periods, hyphens, underscores, and parentheses. 1–90 chars. Must be unique within the subscription.</p>
+  </div>
+  <div class="col good">
+    <div class="label">GCP</div>
+    <h4>Project</h4>
+    <p>A container that lives inside a <strong>folder</strong>, which lives
+    inside an <strong>organization</strong>. Nested &mdash; up to ~8 levels of
+    folders. Resources belong to exactly one project, but projects
+    themselves can be organized in a tree.</p>
+    <p style="margin-top:10px; font-size:14px; color:var(--fg-muted);">Naming rule: 6–30 chars, must start with a lowercase letter, may contain lowercase letters, numbers, and hyphens.</p>
+  </div>
+</div>
+
+<div class="callout">
+<strong>The single most important fact.</strong> In Azure, the RG is
+the lowest unit of grouping and it's flat. In GCP, the project is the
+lowest unit of grouping and it's nested. This is the difference
+that drives every other difference &mdash; IAM, billing, policy, and
+quotas all inherit differently because the shape is different.
+</div>
+
+<h2>What "containment" actually means</h2>
+
+<p>When you create a VM, you tell Azure which RG it goes in. The RG
+is recorded in the resource's <code>id</code> field, which is
+immutable for the life of the resource:</p>
+
+<pre><span class="c">// Azure resource ID</span>
+/subscriptions/<span class="x">00000000-0000-0000-0000-000000000000</span>/
+    resourceGroups/<span class="x">my-app-prod-rg</span>/
+    providers/Microsoft.Compute/
+    virtualMachines/<span class="x">my-vm</span></pre>
+
+<p>You can't move a resource to a different RG. To "move" it, you
+create a new resource in the target RG and delete the old one. (Some
+resource types support actual move operations, but most don't.)</p>
+
+<p>GCP projects are similar &mdash; the project is baked into every
+resource's identity and is not mutable. To migrate, you redeploy.</p>
+
+<div class="callout warn">
+<strong>Resources don't migrate between groups.</strong> The
+immutability of the containing group means that "restructuring"
+your Azure subscription or GCP org tree is a real migration project
+&mdash; not a drag-and-drop in the portal. Plan the group structure
+up front, before you have a thousand resources to move.
+</div>
+
+<h2>The four boundary problems, mapped</h2>
+
+<table class="trace">
+  <tr><th>Problem</th><th>Azure unit</th><th>GCP unit</th></tr>
+  <tr><td>Billing</td><td>RG (cost analyzer can scope to RG)</td><td>Project (billing export per project)</td></tr>
+  <tr><td>Access (least-privilege)</td><td>RG (RBAC scope)</td><td>Project (IAM binding scope)</td></tr>
+  <tr><td>Lifecycle (delete all)</td><td>RG (delete RG → all resources gone)</td><td>Project (delete project → all resources gone)</td></tr>
+  <tr><td>Policy / governance</td><td>RG (Azure Policy assignment)</td><td>Project (Org Policy inheritance)</td></tr>
+</table>
+
+<p>Note how the unit is the same on both sides: a single project in
+GCP does what a single RG does in Azure. The difference is what
+happens <em>above</em> that unit &mdash; which is lesson 2.</p>
+
+<h2>A mental model that travels</h2>
+
+<p>Useful when you're switching between clouds: think of the Azure RG
+as <em>the smallest grouping unit you actually use</em>, and of the
+GCP project as <em>the same, with the option to nest them</em>. If
+you imagine a one-level-only GCP project, you've imagined an Azure
+RG.</p>
+
+<p>Then in lesson 2 we'll see what the extra nesting levels in GCP
+buy you &mdash; and why some teams recreate the hierarchy with Azure
+Management Groups (a separate, optional feature most teams skip).</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You want to group resources so a single team gets least-privilege access to just their slice. What's the right container on each cloud?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Both the Azure Resource Group and the GCP Project are the smallest units at which IAM can be scoped. Above those, IAM is inherited from the subscription or org.">Azure Resource Group / GCP Project</button>
+    <button class="opt" data-value="b" data-why="The subscription and org are too coarse for least-privilege — they typically contain multiple teams' resources.">Azure Subscription / GCP Organization</button>
+    <button class="opt" data-value="c" data-why="Folders in GCP are optional, and Azure RGs are flat. They aren't a universal grouping unit on both clouds.">Azure Resource Group / GCP Folder</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">What happens to a resource's group/project when you try to "move" it after creation?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The group/project is part of the resource's identity and is set at creation time. There's no in-place move for most resource types.">It's a metadata field — you can change it via the portal at any time</button>
+    <button class="opt" data-value="b" data-why="The group/project is part of the resource's identity and is set at creation time. To migrate, you redeploy the resource in the new group.">It's baked into the resource ID and is immutable; you redeploy to "move"</button>
+    <button class="opt" data-value="c" data-why="You can copy a resource, but the new instance is a different resource with its own ID — not a move.">Azure supports it natively; GCP doesn't</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-hierarchy.html">Next: Hierarchy →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me the Azure portal view of a
+    Resource Group and the GCP console view of a Project side by side",
+    or "what's the equivalent of an Azure RG in AWS?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>
