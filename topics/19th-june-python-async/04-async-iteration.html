@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L4 · Async iteration — Python Async</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="03-queues-and-workers.html">← Queues</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 4 of 5</span>
+  <a href="05-common-libraries.html">Next: Common libraries →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 04 · Iteration</div>
+  <h1>Async iteration: <code>async for</code> & generators</h1>
+  <p class="lede">A normal <code>for</code> loop calls <code>__next__</code>
+  synchronously. Some sources &mdash; a websocket, a database cursor,
+  a stream &mdash; don't have the next value ready yet; they need to
+  <code>await</code>. That's the whole point of <code>async for</code>.</p>
+</header>
+
+<h2>The protocol, in one paragraph</h2>
+
+<p>An <strong>async iterable</strong> is anything with an
+<code>__aiter__</code> method. <code>__aiter__</code> returns an
+<strong>async iterator</strong>, which has an <code>__anext__</code>
+method. <code>__anext__</code> returns an awaitable that resolves to
+the next value, or raises <code>StopAsyncIteration</code> when done.
+<code>async for</code> handles all of that for you &mdash; it just
+calls <code>__anext__</code> and waits.</p>
+
+<p>This is exactly the same shape as the sync protocol
+(<code>__iter__</code> / <code>__next__</code> /
+<code>StopIteration</code>), but with <code>await</code> glued in.</p>
+
+<pre><span class="c"># reading an async iterable</span>
+<span class="k">async for</span> line <span class="k">in</span> <span class="v">read_lines</span>(<span class="s">"huge.log"</span>):  <span class="c"># awaits __anext__</span>
+    <span class="k">await</span> <span class="v">process</span>(line)
+
+<span class="c"># building one: an async generator</span>
+<span class="k">async def</span> <span class="v">read_lines</span>(path):
+    <span class="k">async with</span> <span class="v">aiofiles</span>.<span class="v">open</span>(path) <span class="k">as</span> f:
+        <span class="k">async for</span> line <span class="k">in</span> f:        <span class="c"># aiofiles' files are async iterables</span>
+            <span class="k">yield</span> line</pre>
+
+<p>An <code>async def</code> function that contains a
+<code>yield</code> is an <strong>async generator</strong>. Calling it
+returns an async iterator, not a coroutine. The body runs
+incrementally: each <code>yield</code> suspends the generator and
+hands the value to the consumer; the next <code>__anext__</code>
+resumes after the yield.</p>
+
+<h2>Comprehensions have an async form too</h2>
+
+<pre><span class="c"># sync list comprehension</span>
+results = [<span class="v">fetch</span>(u) <span class="k">for</span> u <span class="k">in</span> urls]
+
+<span class="c"># async generator expression — each iteration is a coroutine, not a result</span>
+results = [<span class="v">fetch</span>(u) <span class="k">async for</span> u <span class="k">in</span> <span class="v">urls_stream</span>()]</pre>
+
+<p>Notice the parentheses: <code>[... async for ...]</code> inside
+<code>[</code> <code>]</code> builds a list of <em>coroutines</em>,
+not results. To run them and collect results, you have to
+<code>await</code> the list inside a coroutine or pass it to
+<code>gather</code>:</p>
+
+<pre><span class="k">async def</span> <span class="v">main</span>():
+    coros = [<span class="v">fetch</span>(u) <span class="k">async for</span> u <span class="k">in</span> <span class="v">urls_stream</span>()]
+    results = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(*coros)</pre>
+
+<div class="callout">
+<strong>The <code>async for</code> syntax inside comprehensions
+exists only in async functions.</strong> If you try
+<code>[x async for x in y]</code> outside an <code>async def</code>,
+you get a <code>SyntaxError</code>. The comprehension itself is
+async because its context is.
+</div>
+
+<h2>Async context managers: <code>async with</code></h2>
+
+<p>The same pattern works for <code>with</code>: a normal
+<code>with</code> calls <code>__enter__</code> / <code>__exit__</code>
+synchronously. <code>async with</code> calls
+<code>__aenter__</code> / <code>__aexit__</code>, which are
+coroutines. Use it for any resource whose acquisition or release
+might block on I/O &mdash; a database connection pool, an HTTP
+session, a lock acquired across a network.</p>
+
+<pre><span class="k">class</span> <span class="t">DbSession</span>:
+    <span class="k">async def</span> <span class="v">__aenter__</span>(self):
+        self.conn = <span class="k">await</span> <span class="v">connect</span>(self.dsn)
+        <span class="k">return</span> self.conn
+
+    <span class="k">async def</span> <span class="v">__aexit__</span>(self, *exc):
+        <span class="k">await</span> self.conn.<span class="v">close</span>()
+
+<span class="c"># use it</span>
+<span class="k">async def</span> <span class="v">main</span>():
+    <span class="k">async with</span> <span class="t">DbSession</span>(<span class="s">"postgres://…"</span>) <span class="k">as</span> conn:
+        <span class="v">rows</span> = <span class="k">await</span> conn.<span class="v">fetch</span>(<span class="s">"SELECT …"</span>)</pre>
+
+<p>For the common case, <code>contextlib.asynccontextmanager</code>
+turns a generator into a context manager &mdash; same idea as the
+sync version, but the yield happens in an <code>async def</code>:</p>
+
+<pre><span class="k">from</span> <span class="v">contextlib</span> <span class="k">import</span> <span class="v">asynccontextmanager</span>
+
+<span class="k">@asynccontextmanager</span>
+<span class="k">async def</span> <span class="v">timed</span>(label):
+    start = <span class="v">time</span>.<span class="v">monotonic</span>()
+    <span class="k">try</span>:
+        <span class="k">yield</span>
+    <span class="k">finally</span>:
+        <span class="v">print</span>(<span class="s">f"</span><span class="x">{label}</span><span class="s">: </span><span class="x">{time.monotonic() - start:.2f}</span><span class="s">s"</span>)
+
+<span class="k">async def</span> <span class="v">main</span>():
+    <span class="k">async with</span> <span class="v">timed</span>(<span class="s">"fetch"</span>):
+        <span class="k">await</span> <span class="v">fetch</span>(<span class="s">"https://example.com"</span>)</pre>
+
+<h2>Build a small async pipeline</h2>
+
+<p>Put async iteration and async context management together and you
+get the most useful pattern in the ecosystem &mdash; a pipeline of
+async generators connected by <code>async for</code>. Each stage
+yields one item at a time, so memory stays constant regardless of
+input size.</p>
+
+<pre><span class="c"># producer: emit URLs from a source</span>
+<span class="k">async def</span> <span class="v">urls_from</span>(source):
+    <span class="k">async for</span> line <span class="k">in</span> source:           <span class="c"># lines from a file, a queue, a stream</span>
+        <span class="k">if</span> line.<span class="v">startswith</span>(<span class="s">"http"</span>):
+            <span class="k">yield</span> line.<span class="v">strip</span>()
+
+<span class="c"># worker: fetch and decode</span>
+<span class="k">async def</span> <span class="v">fetch_many</span>(urls, concurrency=<span class="n">10</span>):
+    sem = <span class="v">asyncio</span>.<span class="v">Semaphore</span>(concurrency)
+    <span class="k">async def</span> <span class="v">one</span>(url):
+        <span class="k">async with</span> sem:
+            <span class="v">resp</span> = <span class="k">await</span> <span class="v">httpx</span>.<span class="v">AsyncClient</span>().<span class="v">get</span>(url)
+            <span class="k">return</span> (url, <span class="v">len</span>(<span class="v">resp</span>.<span class="v">content</span>))
+    <span class="k">async for</span> url <span class="k">in</span> urls:
+        <span class="k">yield await</span> <span class="v">one</span>(url)
+
+<span class="c"># wire them up</span>
+<span class="k">async def</span> <span class="v">main</span>():
+    <span class="k">async with</span> <span class="v">aiofiles</span>.<span class="v">open</span>(<span class="s">"urls.txt"</span>) <span class="k">as</span> f:
+        <span class="k">async for</span> url, size <span class="k">in</span> <span class="v">fetch_many</span>(<span class="v">urls_from</span>(f)):
+            <span class="v">print</span>(<span class="s">f"</span><span class="x">{url}</span><span class="s"> → </span><span class="x">{size}</span><span class="s"> bytes"</span>)</pre>
+
+<p>Each stage is a normal Python generator &mdash; testable in
+isolation, composable like Unix pipes. The <code>Semaphore</code>
+caps the in-flight fetches so a fast source can't flood the HTTP
+client.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">What does <code>async def</code> followed by <code>yield</code> create?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="An async def with a yield is an async generator. Calling it returns an async iterator — the body runs one chunk at a time, suspending at each yield.">An async generator function — calling it returns an async iterator, body runs incrementally</button>
+    <button class="opt" data-value="b" data-why="That would be `async def` without `yield`. With yield, it becomes a generator.">A coroutine function that pauses on call</button>
+    <button class="opt" data-value="c" data-why="There's no such thing as a "hybrid". The presence of yield makes it a generator.">A hybrid coroutine-generator</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">Why use <code>async with</code> instead of <code>with</code> for a database connection?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="It's about correctness on I/O, not speed. Connections need to await their setup and teardown; regular with can't yield to the loop.">It's faster</button>
+    <button class="opt" data-value="b" data-why="with calls __enter__/__exit__ synchronously. If those need to do I/O (open a TCP connection, send a TLS handshake), they need to be coroutines — that's __aenter__/__aexit__.">Acquiring/closing the connection requires I/O, which must be awaited</button>
+    <button class="opt" data-value="c" data-why="It doesn't — a regular with is fine for purely in-process resources. async with is for resources that need to await.">with is no longer supported in modern Python</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">You write <code>results = [fetch(u) async for u in urls_stream()]</code> outside an <code>async def</code>. What happens?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The comprehension itself runs and returns a list of coroutine objects — it doesn't try to call them. The problem is downstream.">fetch() is called eagerly, blocking the event loop</button>
+    <button class="opt" data-value="b" data-why="It's a normal list, just full of coroutine objects you haven't awaited. You'd notice when you try to use the contents.">results ends up empty</button>
+    <button class="opt" data-value="c" data-why="async for in a comprehension is only valid inside an async def — the async context has to come from somewhere. Outside one, you get a SyntaxError.">SyntaxError — `async for` in a comprehension is only valid inside an async function</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="03-queues-and-workers.html">← Queues</a>
+    <a href="05-common-libraries.html">Next: Common libraries →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me how to back-pressure an async
+    generator pipeline with a semaphore", or "how do I write an
+    <code>async for</code> over a websocket message stream?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

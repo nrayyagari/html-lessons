@@ -26,11 +26,12 @@
 <div class="topic-hero">
   <div class="meta">Topic · 19 June 2026</div>
   <h1>Python Async</h1>
-  <p>Two short lessons that take you from "what is a coroutine" to
-  "concurrent HTTP fetches with timeouts and error isolation". The
-  mental model is the same throughout: one thread, many coroutines,
-  and <code>await</code> is the only place the loop gets a chance to
-  switch.</p>
+  <p>Five lessons from "what is a coroutine" to production
+  pipelines: event loop basics, task management, queue-based worker
+  pools, async iteration, and the libraries you'll actually use.
+  The mental model is the same throughout: one thread, many
+  coroutines, and <code>await</code> is the only place the loop
+  gets a chance to switch.</p>
 </div>
 
 <h2>Lessons</h2>
@@ -49,6 +50,30 @@
       <h3>Tasks, gather & timeouts</h3>
       <p>create_task, gather with return_exceptions, wait_for for
       deadlines, to_thread for blocking code.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="03-queues-and-workers.html">
+      <div class="num">L3 · Coordination</div>
+      <h3>Queues & producer/consumer</h3>
+      <p>Bounded queues for backpressure, worker pools, the
+      poison-pill shutdown, and clean cancellation.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="04-async-iteration.html">
+      <div class="num">L4 · Iteration</div>
+      <h3>Async iteration</h3>
+      <p>async for, async generators, async comprehensions,
+      async context managers, and a composable pipeline.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="05-common-libraries.html">
+      <div class="num">L5 · Ecosystem</div>
+      <h3>Common libraries</h3>
+      <p>httpx for HTTP, aiofiles for files, asyncpg for Postgres,
+      redis.asyncio for Redis, and the test setup.</p>
     </a>
   </div>
 </div>

@@ -26,9 +26,10 @@
 <div class="topic-hero">
   <div class="meta">Topic · 19 June 2026</div>
   <h1>Kubernetes cert-manager</h1>
-  <p>One lesson on the model: the three CRDs, how the controller
-  reacts to a <code>Certificate</code>, the ACME challenge flow with
-  Let's Encrypt, and the gotchas that bite people in production.</p>
+  <p>Five lessons that take you from "what are the three CRDs" to
+  "production operations with monitoring and revocation":
+  the model, HTTP-01 and DNS-01 challenges in depth, private CAs,
+  and the renewals/rotation/alerting that keep it all running.</p>
 </div>
 
 <h2>Lessons</h2>
@@ -36,9 +37,41 @@
   <div class="card">
     <a href="01-cert-manager-basics.html">
       <div class="num">L1 · The model</div>
-      <h3>cert-manager: who owns your TLS certs?</h3>
+      <h3>Who owns your TLS certs?</h3>
       <p>Three CRDs, the controller loop, the ACME HTTP-01 challenge
       flow, and the gotchas that show up in real clusters.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="02-http01-challenge.html">
+      <div class="num">L2 · HTTP-01</div>
+      <h3>HTTP-01 challenge in depth</h3>
+      <p>The challenge lifecycle, solver config, the self-check,
+      common failure modes, and how to read challenge events.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="03-dns-01-and-wildcards.html">
+      <div class="num">L3 · DNS-01</div>
+      <h3>DNS-01 & wildcards</h3>
+      <p>Why DNS-01 exists, solver config for Cloudflare / Route 53 /
+      GCP / RFC 2136, and wildcard certs.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="04-private-cas.html">
+      <div class="num">L4 · Private CAs</div>
+      <h3>Private CAs: Vault, step-ca, self-signed</h3>
+      <p>When to use a private CA, the four issuer types, and how
+      to distribute the root to clients.</p>
+    </a>
+  </div>
+  <div class="card">
+    <a href="05-renewals-and-operations.html">
+      <div class="num">L5 · Operations</div>
+      <h3>Renewals, rotation & monitoring</h3>
+      <p>renewBefore tuning, key rotation effects, the metrics
+      to alert on, manual renewal, and revocation.</p>
     </a>
   </div>
 </div>

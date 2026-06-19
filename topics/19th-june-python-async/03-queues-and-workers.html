@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L3 · Queues & producer/consumer — Python Async</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="02-tasks-and-gather.html">← Tasks & gather</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 3 of 5</span>
+  <a href="04-async-iteration.html">Next: Async iteration →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 03 · Coordination</div>
+  <h1>Queues & producer/consumer</h1>
+  <p class="lede">Most real async programs aren't "fire 5 HTTP requests
+  and gather" &mdash; they're streams of work, processed by a pool of
+  workers, with backpressure so a slow consumer doesn't make a fast
+  producer OOM. That's a queue.</p>
+</header>
+
+<p>By now you've seen <code>gather</code>: a one-shot fan-out that
+collects when everyone's done. Production code is usually
+<strong>streaming</strong> &mdash; a producer keeps generating work,
+some number of workers keep consuming it, and the system runs forever
+(or until a cancellation).</p>
+
+<p>The right tool is <code>asyncio.Queue</code>. It's a thread-safe,
+awaitable, bounded-by-default queue with three primitives:</p>
+
+<table class="trace">
+  <tr><th>Call</th><th>Suspends when…</th><th>Wakes when…</th></tr>
+  <tr><td><code>await q.put(item)</code></td><td>queue is full (bounded)</td><td>space is available</td></tr>
+  <tr><td><code>await q.get()</code></td><td>queue is empty</td><td>an item is available</td></tr>
+  <tr><td><code>q.task_done()</code></td><td>&mdash;</td><td>marks the most recent <code>get</code> as processed</td></tr>
+</table>
+
+<p>The "suspends when full" behavior is the backpressure. A fast
+producer can't outrun a slow consumer indefinitely &mdash; the queue
+fills, <code>put</code> blocks, and the producer naturally slows down
+to match.</p>
+
+<h2>Worker pool: the canonical pattern</h2>
+
+<pre><span class="k">import</span> <span class="v">asyncio</span>
+
+<span class="k">async def</span> <span class="v">worker</span>(name, q):
+    <span class="k">async for</span> item <span class="k">in</span> q:                <span class="c"># async iterator — exits when q is done</span>
+        <span class="k">try</span>:
+            result = <span class="k">await</span> <span class="v">process</span>(item)
+            <span class="k">await</span> <span class="v">save</span>(result)
+        <span class="k">except</span> <span class="t">Exception</span> <span class="k">as</span> e:
+            <span class="v">log</span>(<span class="s">f"</span><span class="x">{name}</span><span class="s">: </span><span class="x">{item}</span><span class="s"> failed: </span><span class="x">{e}</span><span class="s">"</span>)
+        <span class="k">finally</span>:
+            q.<span class="v">task_done</span>()
+
+<span class="k">async def</span> <span class="v">main</span>(items):
+    q = <span class="v">asyncio</span>.<span class="v">Queue</span>(<span class="n">maxsize</span>=<span class="n">100</span>)   <span class="c"># bounded — backpressure!</span>
+
+    <span class="c"># spin up N workers; they all block on q.get() immediately</span>
+    workers = [
+        <span class="v">asyncio</span>.<span class="v">create_task</span>(<span class="v">worker</span>(<span class="s">f"w</span><span class="x">{i}</span><span class="s">"</span>, q))
+        <span class="k">for</span> i <span class="k">in</span> <span class="v">range</span>(<span class="n">8</span>)
+    ]
+
+    <span class="c"># producer: hand items to the queue, blocking if it's full</span>
+    <span class="k">async def</span> <span class="v">produce</span>():
+        <span class="k">async for</span> item <span class="k">in</span> items:
+            <span class="k">await</span> q.<span class="v">put</span>(item)
+
+    producer = <span class="v">asyncio</span>.<span class="v">create_task</span>(<span class="v">produce</span>())
+
+    <span class="c"># wait for the producer to finish putting everything</span>
+    <span class="k">await</span> producer
+
+    <span class="c"># wait for the queue to drain</span>
+    <span class="k">await</span> q.<span class="v">join</span>()
+
+    <span class="c"># tell workers to exit; the async-for on q exits when the queue stops</span>
+    <span class="k">for</span> _ <span class="k">in</span> <span class="v">range</span>(<span class="n">8</span>):
+        <span class="k">await</span> q.<span class="v">put</span>(<span class="k">None</span>)      <span class="c"># poison pill</span>
+    <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(*workers)</pre>
+
+<div class="callout warn">
+<strong>Bounded queue &gt; unbounded.</strong> An unbounded queue
+(<code>Queue()</code> with no <code>maxsize</code>) gives you no
+backpressure &mdash; a fast producer will happily OOM you. Always set
+<code>maxsize</code>. The right size is "enough to smooth bursts,
+small enough that you can detect a stuck consumer".
+</div>
+
+<h2>The poison-pill pattern, explained</h2>
+
+<p>Workers <code>async for item in q</code> loop forever &mdash; the
+queue never closes on its own. To shut them down cleanly, you send
+<code>None</code> (or any sentinel) once per worker. Each worker hits
+the sentinel, breaks out of the loop, and returns. This is the
+async equivalent of "send a kill signal".</p>
+
+<p>There's a subtler version using
+<code>asyncio.Queue.shutdown()</code> (Python 3.13+) that avoids the
+sentinel. For 3.12 and earlier, the poison pill is the standard
+pattern.</p>
+
+<h2>Cancel a worker cleanly</h2>
+
+<p>If a worker needs to be stopped mid-flight, cancel its task and let
+the cancellation propagate:</p>
+
+<pre><span class="k">async def</span> <span class="v">worker</span>(name, q):
+    <span class="k">try</span>:
+        <span class="k">async for</span> item <span class="k">in</span> q:
+            <span class="k">await</span> <span class="v">process</span>(item)
+            q.<span class="v">task_done</span>()
+    <span class="k">except</span> <span class="t">asyncio</span>.<span class="t">CancelledError</span>:
+        <span class="v">log</span>(<span class="s">f"</span><span class="x">{name}</span><span class="s">: shutting down"</span>)
+        <span class="k">raise</span>   <span class="c"># always re-raise — the supervisor is waiting for it</span>
+
+<span class="c"># somewhere else, when the world is ending:</span>
+worker_task.<span class="v">cancel</span>()
+<span class="k">try</span>:
+    <span class="k">await</span> worker_task
+<span class="k">except</span> <span class="t">asyncio</span>.<span class="t">CancelledError</span>:
+    <span class="k">pass</span></pre>
+
+<p>Two non-obvious rules from lesson 2, restated because they matter
+more in workers:</p>
+
+<ol>
+  <li>Always re-raise <code>CancelledError</code> &mdash; a swallowed
+    cancellation leaks the worker.</li>
+  <li>Do cleanup in <code>finally</code> blocks (close file handles,
+    ack messages, flush buffers).</li>
+</ol>
+
+<h2>When to use a queue vs <code>gather</code></h2>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Use <code>gather</code></h4>
+    <p>You have N coroutines, all started at the same point, all
+    expected to complete (or fail) before you move on. One-shot
+    fan-out, finite.</p>
+  </div>
+  <div class="col good">
+    <h4>Use a queue + workers</h4>
+    <p>Work arrives over time (a stream, a message consumer, a
+    file reader). You want a fixed pool of workers and explicit
+    backpressure. Runs until cancelled.</p>
+  </div>
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You create an <code>asyncio.Queue()</code> with no <code>maxsize</code>. A producer puts items 10x faster than a consumer can process them. What happens?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Without maxsize, put() never blocks. The queue grows without bound until the process runs out of memory.">The queue grows until the process OOMs — there is no backpressure</button>
+    <button class="opt" data-value="b" data-why="put() on an unbounded queue never blocks. There is no auto-balancing to apply.">put() blocks when the queue hits its default size of 1024</button>
+    <button class="opt" data-value="c" data-why="Queue doesn't do that. There's no auto-tuning of consumer concurrency.">Queue drops old items to make room</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">Why send a poison-pill <code>None</code> to each worker at the end?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="None is a sentinel; it doesn't mean anything special to the queue. The worker checks the value and decides to exit.">It's how the queue signals "no more items will come"</button>
+    <button class="opt" data-value="b" data-why="Workers can consume anything. The poison pill is a convention you choose for clarity.">asyncio.Queue raises a special exception when it sees None</button>
+    <button class="opt" data-value="c" data-why="A worker running `async for item in q:` will never exit on its own — the queue doesn't close. Sending None once per worker is the convention: each worker sees it, breaks out of the loop, and returns.">Workers running `async for item in q:` never exit on their own; the poison pill is the convention to tell each one to stop</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">Inside a worker, you do <code>try: ... except CancelledError: pass</code>. What goes wrong?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The exception is real, but the problem isn't a crash — it's that the cancellation is silently dropped.">The worker crashes with a stack trace</button>
+    <button class="opt" data-value="b" data-why="The supervisor is waiting for CancelledError to know the worker has actually stopped. Swallowing it makes the supervisor hang forever (or, with gather, miss the cancellation signal).">The supervisor waiting on the worker never sees the cancellation and hangs</button>
+    <button class="opt" data-value="c" data-why="Cancellation is what you want — suppressing it is the bug. The right thing is to do cleanup in finally and re-raise.">The worker fails to shut down because the cancellation was meant to be ignored</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-tasks-and-gather.html">← Tasks & gather</a>
+    <a href="04-async-iteration.html">Next: Async iteration →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "how do I monitor a worker pool's queue
+    depth?", or "show me how to integrate an external Kafka/RabbitMQ
+    consumer with this pattern".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

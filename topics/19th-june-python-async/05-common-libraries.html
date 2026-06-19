@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L5 · Common libraries — Python Async</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="04-async-iteration.html">← Async iteration</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 5 of 5</span>
+  <a href="../../index.html">⌂ All topics</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 05 · Ecosystem</div>
+  <h1>Common libraries: HTTP, files, databases</h1>
+  <p class="lede">Once you can write <code>async def</code>, the rest of
+  the work is knowing which library to reach for. The standard library
+  has almost nothing async. The ecosystem has a few standouts that
+  cover 80% of real code.</p>
+</header>
+
+<p>The async ecosystem is small compared to the sync one. The libraries
+below are the ones you'll actually use in production code. The pattern
+is consistent: there's an async-first library (use it), and a sync
+one that you wrap in <code>asyncio.to_thread</code> when you have
+to (don't reach for it by default).</p>
+
+<h2>HTTP: <code>httpx</code></h2>
+
+<p>httpx is the modern HTTP client. It has a sync and an async API in
+one package, and the async API is the one to reach for.</p>
+
+<pre><span class="k">import</span> <span class="v">httpx</span>
+
+<span class="k">async def</span> <span class="v">main</span>():
+    <span class="k">async with</span> <span class="v">httpx</span>.<span class="v">AsyncClient</span>(
+        <span class="n">timeout</span>=<span class="n">10.0</span>,
+        <span class="n">follow_redirects</span>=<span class="k">True</span>,
+        <span class="n">headers</span>={<span class="s">"user-agent"</span>: <span class="s">"myapp/1.0"</span>},
+    ) <span class="k">as</span> client:
+        <span class="c"># one request</span>
+        r = <span class="k">await</span> client.<span class="v">get</span>(<span class="s">"https://api.example.com/v1/things"</span>)
+        r.<span class="v">raise_for_status</span>()
+        <span class="v">data</span> = r.<span class="v">json</span>()
+
+        <span class="c"># many in parallel — same pattern as lesson 2</span>
+        urls = [<span class="s">f"https://api.example.com/v1/things/</span><span class="x">{i}</span><span class="s">"</span> <span class="k">for</span> i <span class="k">in</span> <span class="v">range</span>(<span class="n">100</span>)]
+        results = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">gather</span>(
+            *(<span class="v">client</span>.<span class="v">get</span>(u) <span class="k">for</span> u <span class="k">in</span> urls),
+            <span class="k">return_exceptions</span>=<span class="k">True</span>,
+        )</pre>
+
+<p>The <code>AsyncClient</code> is the right unit of reuse: it
+manages a connection pool, so 100 <code>get()</code> calls reuse the
+same TCP connections instead of opening 100 new ones. Always use
+<code>async with AsyncClient()</code> &mdash; the client cleans up
+the pool on exit.</p>
+
+<div class="callout">
+<strong>Don't use <code>requests</code> in an async program.</strong>
+<code>requests</code> is blocking. Wrap it in
+<code>asyncio.to_thread</code> only if you must (legacy code), and
+even then prefer <code>httpx</code> &mdash; the API is nearly
+identical and the migration is mechanical.
+</div>
+
+<h2>Files: <code>aiofiles</code></h2>
+
+<p>Python's built-in <code>open()</code> is blocking. <code>aiofiles</code>
+gives you an async wrapper with the same API:</p>
+
+<pre><span class="k">import</span> <span class="v">aiofiles</span>
+
+<span class="c"># read line by line without blocking the loop</span>
+<span class="k">async def</span> <span class="v">read_lines</span>(path):
+    <span class="k">async with</span> <span class="v">aiofiles</span>.<span class="v">open</span>(path, <span class="n">mode</span>=<span class="s">"r"</span>) <span class="k">as</span> f:
+        <span class="k">async for</span> line <span class="k">in</span> f:
+            <span class="k">yield</span> line
+
+<span class="c"># write a big file in chunks</span>
+<span class="k">async def</span> <span class="v">write_report</span>(path, chunks):
+    <span class="k">async with</span> <span class="v">aiofiles</span>.<span class="v">open</span>(path, <span class="s">"w"</span>) <span class="k">as</span> f:
+        <span class="k">for</span> chunk <span class="k">in</span> chunks:
+            <span class="k">await</span> f.<span class="v">write</span>(chunk)</pre>
+
+<p><code>aiofiles</code> is a thin wrapper &mdash; under the hood it
+runs the blocking <code>open</code> / <code>read</code> /
+<code>write</code> in a thread pool. The savings come from not
+holding the loop hostage during the I/O, not from raw throughput.</p>
+
+<h2>PostgreSQL: <code>asyncpg</code></h2>
+
+<p><code>asyncpg</code> is the fastest PostgreSQL driver in the
+ecosystem and is async-native. It has its own connection pool,
+<code>asyncpg.create_pool</code>.</p>
+
+<pre><span class="k">import</span> <span class="v">asyncpg</span>
+
+<span class="k">async def</span> <span class="v">main</span>():
+    pool = <span class="k">await</span> <span class="v">asyncpg</span>.<span class="v">create_pool</span>(
+        dsn=<span class="s">"postgres://user:pass@db:5432/app"</span>,
+        <span class="n">min_size</span>=<span class="n">2</span>,
+        <span class="n">max_size</span>=<span class="n">10</span>,
+    )
+
+    <span class="k">async with</span> pool.<span class="v">acquire</span>() <span class="k">as</span> conn:
+        <span class="k">async with</span> conn.<span class="v">transaction</span>():
+            rows = <span class="k">await</span> conn.<span class="v">fetch</span>(<span class="s">"SELECT id, name FROM users WHERE active = $1"</span>, <span class="k">True</span>)
+
+    <span class="k">await</span> pool.<span class="v">close</span>()</pre>
+
+<p>For an ORM, <code>SQLAlchemy</code> 2.0 has full async support via
+<code>AsyncSession</code> &mdash; the migration is mostly
+s/<code>session.execute</code>/<code>await session.execute</code>/.</p>
+
+<h2>Redis: <code>redis-py</code> asyncio mode</h2>
+
+<p>The official <code>redis</code> client has an async mode that
+mirrors the sync API. Use <code>redis.asyncio.Redis</code>.</p>
+
+<pre><span class="k">import</span> <span class="v">redis.asyncio</span> <span class="k">as</span> <span class="v">redis</span>
+
+<span class="k">async def</span> <span class="v">main</span>():
+    r = <span class="v">redis</span>.<span class="t">Redis</span>(host=<span class="s">"cache"</span>, <span class="n">decode_responses</span>=<span class="k">True</span>)
+    <span class="k">await</span> r.<span class="v">set</span>(<span class="s">"key"</span>, <span class="s">"value"</span>, <span class="n">ex</span>=<span class="n">60</span>)
+    val = <span class="k">await</span> r.<span class="v">get</span>(<span class="s">"key"</span>)
+    <span class="k">await</span> r.<span class="v">aclose</span>()</pre>
+
+<h2>Web frameworks: a quick map</h2>
+
+<table class="trace">
+  <tr><th>Framework</th><th>Style</th><th>Use when</th></tr>
+  <tr><td><code>FastAPI</code></td><td>ASGI, type-annotated</td><td>You want OpenAPI / JSON APIs with minimal code. The default choice for new services.</td></tr>
+  <tr><td><code>Starlette</code></td><td>ASGI, low-level</td><td>You're building something FastAPI-shaped but want full control. FastAPI is built on top.</td></tr>
+  <tr><td><code>aiohttp</code></td><td>ASGI-ish (its own)</td><td>You have an existing aiohttp codebase. For new code, FastAPI is usually simpler.</td></tr>
+  <tr><td><code>Django</code> 4+</td><td>WSGI + ASGI views</td><td>You have a Django codebase. Use <code>async def</code> views and an ASGI server (uvicorn, daphne).</td></tr>
+  <tr><td><code>Sanic</code></td><td>ASGI/uvicorn-friendly</td><td>You want Django-ish ergonomics with native async performance.</td></tr>
+</table>
+
+<h2>The wrap-in-thread fallback</h2>
+
+<p>Sometimes the library you need is sync only. The right move isn't
+"give up on async" &mdash; it's <code>asyncio.to_thread</code>:</p>
+
+<pre><span class="c"># legacy library that only has a sync API</span>
+<span class="k">import</span> <span class="v">legacy_pdf_lib</span>
+
+<span class="k">async def</span> <span class="v">make_pdf_async</span>(data):
+    <span class="c"># run the blocking call in a worker thread</span>
+    pdf_bytes = <span class="k">await</span> <span class="v">asyncio</span>.<span class="v">to_thread</span>(<span class="v">legacy_pdf_lib</span>.<span class="v">render</span>, data)
+    <span class="k">return</span> pdf_bytes</pre>
+
+<p>The loop stays responsive while the sync code runs in the default
+<code>ThreadPoolExecutor</code>. It's not free (thread context
+switches, ~1MB stack per thread) but for I/O-bound legacy code it's
+the right bridge.</p>
+
+<div class="callout warn">
+<strong>Don't wrap CPU work in <code>to_thread</code>.</strong> The
+GIL still serializes Python bytecode across threads. For CPU-bound
+work, use <code>ProcessPoolExecutor</code> or a native extension
+(numpy, Cython, Rust via PyO3).
+</div>
+
+<h2>Testing: <code>pytest-asyncio</code></h2>
+
+<p>The <code>pytest-asyncio</code> plugin lets you write
+<code>async def test_…</code> functions. Without it, pytest tries to
+call your coroutine and gets a coroutine object instead of a
+result.</p>
+
+<pre><span class="c"># pyproject.toml</span>
+[tool.pytest.ini_options]
+asyncio_mode = <span class="s">"auto"</span>
+
+<span class="c"># tests/test_fetch.py</span>
+<span class="k">import</span> <span class="v">pytest</span>
+
+<span class="k">async def</span> <span class="v">test_fetch_returns_200</span>(httpx_mock):
+    <span class="v">httpx_mock</span>.<span class="v">add_response</span>(<span class="n">url</span>=<span class="s">"https://api.example.com/"</span>, <span class="n">json</span>={<span class="s">"ok"</span>: <span class="k">True</span>})
+    r = <span class="k">await</span> <span class="v">fetch</span>(<span class="s">"https://api.example.com/"</span>)
+    <span class="k">assert</span> r.<span class="v">status_code</span> == <span class="n">200</span>
+
+<span class="k">async def</span> <span class="v">test_fetch_raises_on_500</span>(httpx_mock):
+    <span class="v">httpx_mock</span>.<span class="v">add_response</span>(<span class="n">url</span>=<span class="s">"https://api.example.com/"</span>, <span class="n">status_code</span>=<span class="n">500</span>)
+    <span class="k">with</span> <span class="v">pytest</span>.<span class="v">raises</span>(<span class="t">httpx</span>.<span class="t">HTTPStatusError</span>):
+        <span class="k">await</span> <span class="v">fetch</span>(<span class="s">"https://api.example.com/"</span>)</pre>
+
+<p>The <code>httpx_mock</code> fixture (from
+<code>pytest-httpx</code>) intercepts network calls so your tests
+run offline and are deterministic.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="b">
+  <p class="q">You need to call a sync legacy library from inside an async program. What's the right move?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Making the whole function sync would block the loop and break concurrency everywhere else.">Convert the function containing the call to a sync function</button>
+    <button class="opt" data-value="b" data-why="to_thread runs the blocking call in the default ThreadPoolExecutor, so the loop keeps handling other coroutines while it runs.">Wrap the call in asyncio.to_thread</button>
+    <button class="opt" data-value="c" data-why="Subprocess would work, but it's a heavier hammer than needed. The thread pool is the right tool for this case.">Use asyncio.create_subprocess_exec to run it in a separate process</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">You write <code>def test_thing(): ...</code> (sync) but it does <code>await some_coro()</code> inside. What happens?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="A sync def can't contain await — that would be a syntax error at function definition time.">It runs but doesn't actually wait — the coroutine is leaked</button>
+    <button class="opt" data-value="b" data-why="pytest doesn't await coroutines itself. Without pytest-asyncio (or `asyncio.run`), the coroutine is never awaited and you get a warning, not a useful test.">pytest automatically awaits the coroutine for you</button>
+    <button class="opt" data-value="c" data-why="await is only valid inside async def. The function definition would fail with `SyntaxError: 'await' outside async function`.">SyntaxError: `await` outside an `async def`</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">You have a CPU-heavy computation (image resizing) inside a request handler. Which is the right async strategy?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="to_thread is only useful for I/O-bound work — the GIL still serializes Python across threads. CPU work needs to escape the GIL, which means a separate process.">Run it in a ProcessPoolExecutor, not a thread</button>
+    <button class="opt" data-value="b" data-why="to_thread moves I/O off the loop, but Python's GIL means threads can't run Python bytecode in parallel. CPU work would still serialize.">Wrap it in asyncio.to_thread</button>
+    <button class="opt" data-value="c" data-why="asyncio is for I/O concurrency. Running a CPU-bound loop in it gives no benefit and blocks everything else.">Run it directly in the async event loop</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="04-async-iteration.html">← Async iteration</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../../index.html">⌂ All topics</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me a real FastAPI service that
+    uses asyncpg + httpx + aiofiles", or "how do I gracefully shut down
+    a worker pool on SIGTERM?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

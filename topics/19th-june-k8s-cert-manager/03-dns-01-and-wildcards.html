@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L3 · DNS-01 & wildcards — Kubernetes cert-manager</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="02-http01-challenge.html">← HTTP-01</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 3 of 5</span>
+  <a href="04-private-cas.html">Next: Private CAs →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 03 · Challenges</div>
+  <h1>DNS-01 & wildcards</h1>
+  <p class="lede">When HTTP-01 isn't an option &mdash; cluster is firewalled,
+  domain is wildcarded, or you don't want a public Ingress &mdash; DNS-01
+  proves control by creating a TXT record instead of serving a token.</p>
+</header>
+
+<p>HTTP-01 is the default because it's simple: prove you control
+<code>api.example.com</code> by serving a token on port 80 of
+<code>api.example.com</code>. But that has two structural problems:</p>
+
+<ol>
+  <li><strong>Port 80 must be reachable from the public internet.</strong>
+    Internal clusters, air-gapped environments, clusters behind a
+    non-internet-facing LB &mdash; all no-go.</li>
+  <li><strong>It can only prove the exact hostname.</strong> Wildcard
+    certs (<code>*.example.com</code>) need a way to prove control of
+    <em>every possible subdomain</em>, which HTTP-01 can't do.</li>
+</ol>
+
+<p>DNS-01 solves both. The CA gives you a token, you prove control by
+creating a TXT record at
+<code>_acme-challenge.api.example.com</code> with the token as the value.
+The CA queries DNS, sees the record, done. No inbound network path
+required &mdash; you only need the ability to <em>write</em> DNS
+records, which your DNS provider's API already gives you.</p>
+
+<h2>How DNS-01 works end to end</h2>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>1. cert-manager creates the Challenge resource</strong><p>Same as HTTP-01, but the <code>type</code> is
+    <code>DNS-01</code> instead of <code>HTTP-01</code>. The
+    <code>DNSName</code> is <code>_acme-challenge.&lt;your-domain&gt;</code>.</p></div></div>
+  <div class="step"><div class="body"><strong>2. The DNS-01 solver calls your DNS provider's API</strong><p>cert-manager has built-in "solvers" for the major DNS providers
+    (Cloudflare, Route 53, Google Cloud DNS, Azure DNS, DigitalOcean,
+    Linode, RFC 2136, …). The solver creates a TXT record at the
+    challenge name, with the token as the value.</p></div></div>
+  <div class="step"><div class="body"><strong>3. The CA queries DNS</strong><p>From its own recursive resolvers, the CA asks
+    "what's the TXT record for <code>_acme-challenge.api.example.com</code>?".
+    The record your solver just created is the answer.</p></div></div>
+  <div class="step"><div class="body"><strong>4. After the CA verifies, cert-manager cleans up the TXT record</strong><p>The challenge-specific record is removed. The cert is issued and
+    stored in the Secret.</p></div></div>
+</div>
+
+<div class="callout">
+<strong>DNS propagation time.</strong> Unlike HTTP-01 (where the solver
+is a local route), DNS-01 depends on the TXT record being visible to
+the CA's resolvers. Some providers (Cloudflare, Route 53) propagate
+in seconds; others (some registrars) take minutes. cert-manager
+retries, but if your provider is slow you may want to raise
+<code>solvers[].dns01.&lt;provider&gt;.preCheckNameservers</code> to
+a public resolver like <code>1.1.1.1:53</code>.
+</div>
+
+<h2>Solver config: the four you'll actually use</h2>
+
+<h3>Cloudflare</h3>
+
+<pre><span class="k">solvers</span>:
+  - <span class="k">dns01</span>:
+      <span class="k">cloudflare</span>:
+        <span class="k">apiTokenSecretRef</span>:
+          <span class="k">name</span>: cloudflare-api-token
+          <span class="k">key</span>: api-token
+        <span class="k">email</span>: ops@example.com</pre>
+
+<p>The secret is a normal k8s Secret with one key, the value being a
+scoped Cloudflare API token
+(<em>Zone:DNS:Edit</em> on the zones you need).</p>
+
+<h3>AWS Route 53</h3>
+
+<pre><span class="k">solvers</span>:
+  - <span class="k">dns01</span>:
+      <span class="k">route53</span>:
+        <span class="k">region</span>: us-east-1
+        <span class="c"># uses the controller's IAM role — IRSA or node role</span></pre>
+
+<p>No secret &mdash; cert-manager uses the AWS SDK and assumes the
+controller pod has IAM permission to upsert records in your hosted
+zone. With IRSA (IAM Roles for Service Accounts) you scope the
+permission to a single zone.</p>
+
+<h3>Google Cloud DNS</h3>
+
+<pre><span class="k">solvers</span>:
+  - <span class="k">dns01</span>:
+      <span class="k">cloudDNS</span>:
+        <span class="k">project</span>: my-gcp-project
+        <span class="c"># uses the controller's GCP service account</span></pre>
+
+<h3>RFC 2136 (any DNS server with a dynamic-update key)</h3>
+
+<pre><span class="k">solvers</span>:
+  - <span class="k">dns01</span>:
+      <span class="k">rfc2136</span>:
+        <span class="k">nameserver</span>: ns1.example.com:53
+        <span class="k">tsigSecretSecretRef</span>:
+          <span class="k">name</span>: tsig-secret
+          <span class="k">key</span>: tsig-key</pre>
+
+<p>This is the "I run my own BIND / PowerDNS" option. The secret holds
+a TSIG key pair that authorizes cert-manager to update the zone.</p>
+
+<h2>Wildcard certs: the killer feature</h2>
+
+<p>Wildcards are why DNS-01 exists in the first place &mdash; there's no
+other way to issue <code>*.example.com</code> from Let's Encrypt. The
+<code>Certificate</code> looks almost the same:</p>
+
+<pre><span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: Certificate
+<span class="k">metadata</span>:
+  <span class="k">name</span>: wildcard-example-com
+  <span class="k">namespace</span>: default
+<span class="k">spec</span>:
+  <span class="k">secretName</span>: wildcard-example-com-tls
+  <span class="k">issuerRef</span>:
+    <span class="k">name</span>: letsencrypt-prod
+    <span class="k">kind</span>: ClusterIssuer
+  <span class="k">dnsNames</span>:
+    - <span class="s">"*.example.com"</span>
+    - <span class="s">"example.com"</span>     <span class="c"># base domain — LE requires both</span></pre>
+
+<div class="callout warn">
+<strong>LE will not renew a wildcard via the same challenge if the
+issuer has rate limits.</strong> If you're issuing many wildcards on
+the same base domain, batch them into a single
+<code>Certificate</code> with multiple SANs instead of one
+<code>Certificate</code> per subdomain.
+</div>
+
+<h2>Multi-provider clusters: solver selection</h2>
+
+<p>cert-manager tries each solver in <code>solvers</code> order, in
+each configured <code>selector</code> zone, until one succeeds. This
+lets you handle split-horizon DNS or multi-cloud:</p>
+
+<pre><span class="k">solvers</span>:
+  <span class="c"># 1. try Route 53 for *.aws.example.com</span>
+  - <span class="k">selector</span>:
+      <span class="k">dnsZones</span>:
+        - <span class="s">"aws.example.com"</span>
+    <span class="k">dns01</span>:
+      <span class="k">route53</span>: { <span class="k">region</span>: us-east-1 }
+
+  <span class="c"># 2. fall back to Cloudflare for everything else</span>
+  - <span class="k">dns01</span>:
+      <span class="k">cloudflare</span>:
+        <span class="k">apiTokenSecretRef</span>: { <span class="k">name</span>: cloudflare-api-token, <span class="k">key</span>: api-token }</pre>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="c">
+  <p class="q">Your cluster is air-gapped. The team needs a public wildcard cert for <code>*.example.com</code>. Which challenge works?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="HTTP-01 requires inbound port 80, which an air-gapped cluster doesn't have, and HTTP-01 can't issue wildcards anyway.">HTTP-01</button>
+    <button class="opt" data-value="b" data-why="Self-signed certs aren't trusted by browsers or other clients, so they don't work for a public-facing wildcard.">Self-signed with a self-signed Issuer</button>
+    <button class="opt" data-value="c" data-why="DNS-01 only needs outbound access to your DNS provider's API. It can also issue wildcards — the only ACME challenge that can.">DNS-01 via Cloudflare/Route 53/etc.</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">When using DNS-01 with Cloudflare, where does cert-manager get the credential it uses to create the TXT record?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The token is a normal Kubernetes Secret referenced by apiTokenSecretRef. The Secret is not created by cert-manager — you make it.">From a Kubernetes Secret holding a scoped API token</button>
+    <button class="opt" data-value="b" data-why="There is no central Cloudflare account in cert-manager. Each cluster/issuer has its own scoped Secret.">From a built-in, hard-coded Cloudflare account in cert-manager</button>
+    <button class="opt" data-value="c" data-why="The TXT record is created via the Cloudflare API, not via the Let's Encrypt ACME protocol directly.">From the Let's Encrypt ACME account key</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">You're issuing 50 wildcard certs, one per subdomain. What's the better approach?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="That's exactly the inefficient approach the question is steering you away from. One cert per subdomain hits LE's per-registered-domain rate limit fast.">Keep one Certificate per subdomain — easier to reason about</button>
+    <button class="opt" data-value="b" data-why="A single Certificate can carry many SANs. The issuance cost is amortised, you avoid rate limits, and all subdomains share the same renewal window.">Combine them into one Certificate with multiple dnsNames entries</button>
+    <button class="opt" data-value="c" data-why="Using a different CA doesn't help with the inefficiency of 50 separate renewal cycles.">Switch to a different CA so rate limits don't apply</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="02-http01-challenge.html">← HTTP-01</a>
+    <a href="04-private-cas.html">Next: Private CAs →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "show me IRSA setup for Route 53 DNS-01",
+    or "how do I run cert-manager with split-horizon DNS across two
+    providers?".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

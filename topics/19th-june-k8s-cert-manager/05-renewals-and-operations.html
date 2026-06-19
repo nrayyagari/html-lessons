@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L5 · Renewals & operations — Kubernetes cert-manager</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="04-private-cas.html">← Private CAs</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 5 of 5</span>
+  <a href="../../index.html">⌂ All topics</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 05 · Operations</div>
+  <h1>Renewals, rotation & monitoring</h1>
+  <p class="lede">Issuing a cert is half the job. The other half is making
+  sure it renews before it expires, that key rotation doesn't break
+  in-flight connections, and that you find out about problems
+  <em>before</em> the cert expires at 03:00 on a Sunday.</p>
+</header>
+
+<h2>The renewal window</h2>
+
+<p>cert-manager watches every cert it issued and renews when the
+remaining validity drops below a threshold. The default is <strong>30
+days</strong> &mdash; i.e. a 90-day Let's Encrypt cert gets renewed at
+the 60-day mark.</p>
+
+<pre><span class="k">spec</span>:
+  <span class="c"># override the default; renew when 1/3 of the duration is left</span>
+  <span class="k">duration</span>: 2160h       <span class="c"># 90 days</span>
+  <span class="k">renewBefore</span>: 720h     <span class="c"># 30 days before expiry</span></pre>
+
+<p>Why the default is what it is: with a 90-day LE cert and a 30-day
+window, you get <strong>two full renewals worth of buffer</strong>
+before the cert actually expires. If one renewal fails
+(LE outage, DNS hiccup, controller restart), the cert still has a
+month to live and cert-manager can retry. The 60-day boundary isn't
+arbitrary &mdash; it's the floor for "two retries in the worst
+case".</p>
+
+<div class="callout">
+<strong>Don't make <code>renewBefore</code> too aggressive.</strong> A
+<code>renewBefore</code> of 1 hour on a 90-day cert means you have
+~zero retries. If the first renewal fails, the cert expires and your
+service is down. Leave at least 7 days of buffer.
+</div>
+
+<h2>What actually happens during renewal</h2>
+
+<p>The renewal is a full new issuance &mdash; new private key, new
+cert, new ACME order, new challenge. The <code>Secret</code> is
+updated in place. Any pod mounting that Secret via projected volume
+sees the new cert within the kubelet's sync interval (default 60s
+after the Secret update).</p>
+
+<p>Key rotation is <em>on by default</em>: every renewal generates a
+new private key. That's safer (forward secrecy) but it means any
+in-flight TLS connection using the old key gets cut when the Secret
+updates. The cost is small for HTTP/2 (which can handle brief
+reconnects) and zero for short-lived calls.</p>
+
+<div class="callout warn">
+<strong>Long-lived connections across renewals.</strong> A gRPC stream
+or a long-poll HTTP request that's mid-flight during a renewal will
+fail with a TLS error. For most services this is invisible (the client
+reconnects). For streaming workloads, schedule renewals during low
+traffic, or pin connections to a specific cert version via a
+<code>gateway.networking.k8s.io</code> backendTLSPolicy.
+</div>
+
+<h2>The four states a Certificate can be in</h2>
+
+<table class="trace">
+  <tr><th>State</th><th>Condition</th><th>What to do</th></tr>
+  <tr><td><code>Ready=True</code></td><td>cert is valid, not yet near expiry</td><td>nothing</td></tr>
+  <tr class="highlight"><td><code>Ready=True</code> (renewing)</td><td>cert is valid, renewal in progress</td><td>nothing &mdash; this is normal</td></tr>
+  <tr><td><code>Ready=False</code></td><td>last renewal failed, cert may be near expiry</td><td>describe &amp; fix</td></tr>
+  <tr><td><code>Ready=False</code> + expired</td><td>cert has passed its <code>notAfter</code></td><td>everything is broken &mdash; investigate now</td></tr>
+</table>
+
+<p>cert-manager does <strong>not</strong> retry forever on a failed
+renewal. After a few attempts (default 3, configurable via the
+<code>--max-retries</code> flag on the controller) it gives up and
+leaves the cert in its last-known-good state. If the cert is then
+near expiry, you're in trouble.</p>
+
+<h2>Monitoring: the metrics that actually matter</h2>
+
+<p>cert-manager exposes Prometheus metrics on
+<code>:9402/metrics</code> on the controller pod. The five to
+alert on:</p>
+
+<div class="stat-row">
+  <div class="stat"><span class="num">1</span><span class="lbl">cert expiry &lt; 7 days</span></div>
+  <div class="stat"><span class="num">2</span><span class="lbl">renewal failures</span></div>
+  <div class="stat"><span class="num">3</span><span class="lbl">controller down</span></div>
+  <div class="stat"><span class="num">4</span><span class="lbl">challenge errors</span></div>
+  <div class="stat"><span class="num">5</span><span class="lbl">rate-limit hits</span></div>
+</div>
+
+<p>Translated into PromQL:</p>
+
+<pre><span class="c"># any cert expiring in the next 7 days</span>
+certmanager_certificate_expiration_timestamp_seconds
+  - time() &lt; <span class="n">7</span> * <span class="n">86400</span>
+
+<span class="c"># controller isn't running</span>
+absent(up{job=<span class="s">"cert-manager"</span>})
+
+<span class="c"># failed renewals in the last hour (LE rate-limited, DNS down, etc.)</span>
+rate(certmanager_controller_sync_call_count{result=<span class="s">"error"</span>}[<span class="n">1</span>h]) &gt; <span class="n">0</span></pre>
+
+<p>Pair the cert-expiry alert with a long window
+(7 days, not 24 hours) so you get paged during business hours, not
+at 03:00.</p>
+
+<h2>The renewal &mdash; end-to-end trace</h2>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>1. cert-manager polls every cert it issued</strong><p>Every ~hour by default, controlled by
+    <code>--renew-before-expiration-check-interval</code>.</p></div></div>
+  <div class="step"><div class="body"><strong>2. Spots one that crossed the renewal threshold</strong><p>Subtracts <code>renewBefore</code> from <code>notAfter</code>. If we're
+    past that point, schedule a renewal.</p></div></div>
+  <div class="step"><div class="body"><strong>3. Creates a new Order &amp; Challenge</strong><p>Same flow as initial issuance: ACME order, HTTP-01 or DNS-01
+    challenge, solver does its thing.</p></div></div>
+  <div class="step"><div class="body"><strong>4. New cert lands in the same Secret</strong><p>The <code>Secret.data</code> is updated. Any pod mounting that
+    Secret picks up the new cert on the next sync (usually within a
+    minute).</p></div></div>
+  <div class="step"><div class="body"><strong>5. Old cert / private key is discarded</strong><p>cert-manager doesn't track cert history by default &mdash; once the
+    new cert is in the Secret, the old one is gone. If you need
+    history, use <code>revisionHistoryLimit</code> on the
+    <code>Certificate</code> (cert-manager 1.15+).</p></div></div>
+</div>
+
+<h2>Manual renewal &amp; force-renew</h2>
+
+<p>Sometimes you want to renew <em>now</em> &mdash; the private key was
+leaked, you want to rotate, or a new CA root was deployed.</p>
+
+<pre><span class="c"># trigger a renewal by annotating the Certificate</span>
+kubectl certificate renew api-example-com -n default
+
+<span class="c"># or, if you don't have the cert-manager kubectl plugin, patch the Secret</span>
+kubectl delete secret api-example-com-tls -n default
+<span class="c"># cert-manager re-issues within seconds because the Certificate still references the Secret</span></pre>
+
+<p>For emergency revocation (key compromised): the CA-specific
+<code>revoke</code> action via the issuer. ACME supports
+<code>POST /acme/revoke-cert</code> for LE-issued certs; private CAs
+have their own revocation APIs.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="c">
+  <p class="q">A 90-day cert with the default <code>renewBefore</code> of 30 days &mdash; at what point does cert-manager first attempt renewal?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="That's the expiry, not the renewal point. cert-manager always renews before expiry, not at it.">At day 89 (just before expiry)</button>
+    <button class="opt" data-value="b" data-why="That's not how renewBefore works. It subtracts from notAfter, not from the issuance date.">Halfway through the cert's lifetime</button>
+    <button class="opt" data-value="c" data-why="renewBefore=30d means cert-manager renews 30 days before notAfter, which is at the day-60 mark. That leaves two full renewals of buffer.">At the day-60 mark</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">A renewal failed twice. The cert is still valid for 10 more days. What should you do?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Waiting 10 days means the cert will actually expire and your service will break.">Nothing — 10 days is plenty of time, cert-manager will figure it out</button>
+    <button class="opt" data-value="b" data-why="You have ~3 days of cert-manager retries left before the cert is past notAfter. Find the root cause now: describe the Certificate and the latest Challenge/Order for the failure reason.">Investigate immediately: describe the Certificate and the latest Challenge</button>
+    <button class="opt" data-value="c" data-why="Deleting the Secret is a valid last-resort, but the right first move is to understand why the renewal failed. The same root cause is likely to bite the next issuance.">Delete the Secret to force a fresh issuance</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">What's the right alert for a cert that's expiring in 6 days?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="7 days is the standard buffer: long enough that the alert wakes someone during business hours, short enough that there's still time to actually fix the problem.">Page someone, with a 7-day window for context</button>
+    <button class="opt" data-value="b" data-why="Page on 30 days and you'll get woken up on every cert that's in its normal renewal window — alert fatigue.">Don't page; cert-manager will renew automatically within 30 days</button>
+    <button class="opt" data-value="c" data-why="The 7-day alert is what gives you the runway. By the time you're at 1 day, you're already in firefighting mode.">Wait until 24 hours before expiry, that's enough warning</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="04-private-cas.html">← Private CAs</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+    <a href="../../index.html">⌂ All topics</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "how do I add the cert-manager metrics to
+    my Prometheus scrape config?", or "show me the cert-manager Helm
+    values for setting <code>renewBefore</code> cluster-wide".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

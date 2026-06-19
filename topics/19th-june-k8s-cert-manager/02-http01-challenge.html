@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L2 · HTTP-01 challenge in depth — Kubernetes cert-manager</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="01-cert-manager-basics.html">← The model</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 2 of 5</span>
+  <a href="03-dns-01-and-wildcards.html">Next: DNS-01 & wildcards →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 02 · Challenges</div>
+  <h1>HTTP-01: how the proof of control actually works</h1>
+  <p class="lede">When you issue a cert from Let's Encrypt, the CA has to be
+  sure you actually own the domain. HTTP-01 is the simplest way: the CA
+  hits <code>http://your-domain/.well-known/acme-challenge/&lt;token&gt;</code>
+  and expects a specific string back. cert-manager makes that happen
+  automatically &mdash; here's how.</p>
+</header>
+
+<p>ACME is the protocol Let's Encrypt speaks. Every issuance is a
+challenge-response: the CA gives you a token, you prove you control the
+domain by serving a specific response, and only then will the CA sign a
+cert. The "how" of that proof is a <strong>challenge type</strong>.
+HTTP-01 is the most common one and the easiest to reason about.</p>
+
+<h2>The lifecycle of an HTTP-01 challenge</h2>
+
+<div class="steps">
+  <div class="step"><div class="body"><strong>1. cert-manager creates a <code>Challenge</code> resource</strong><p>Triggered by the <code>Certificate</code>. The Challenge carries
+    a token (random string), a key authorization (a hash of the token
+    plus your ACME account key), and the URL the CA will hit.</p></div></div>
+  <div class="step"><div class="body"><strong>2. The HTTP-01 solver sees the Challenge</strong><p>cert-manager's built-in HTTP-01 solver creates a self-check: it
+    stands up a <em>temporary pod or Ingress rule</em> inside the cluster
+    that serves the key authorization at
+    <code>http://&lt;domain&gt;/.well-known/acme-challenge/&lt;token&gt;</code>.</p></div></div>
+  <div class="step"><div class="body"><strong>3. Let's Encrypt hits the URL from the public internet</strong><p>LE does its own check from its infrastructure &mdash; not from inside
+    the cluster. The response must match the key authorization
+    <em>exactly</em>.</p></div></div>
+  <div class="step"><div class="body"><strong>4. The Challenge is marked as <code>valid</code> (or <code>errored</code>)</strong><p>If the response matched, LE issues the cert. cert-manager stores
+    it in the Secret, and the Challenge is cleaned up (the temporary
+    solver route is removed).</p></div></div>
+</div>
+
+<div class="callout">
+<strong>The self-check is what makes HTTP-01 robust.</strong> Before
+LE is even involved, cert-manager verifies the solver route is reachable
+<em>from inside the cluster</em>. If the self-check fails, you get an
+error in seconds rather than waiting for LE's timeout (which is minutes).
+</div>
+
+<h2>What the solver config actually does</h2>
+
+<p>In the <code>ClusterIssuer</code>, this is the block that controls
+HTTP-01:</p>
+
+<pre><span class="k">spec</span>:
+  <span class="k">acme</span>:
+    <span class="k">solvers</span>:
+      - <span class="k">http01</span>:
+          <span class="k">ingress</span>:
+            <span class="k">class</span>: nginx
+            <span class="k">name</span>: cm-acme-http-solver     <span class="c"># optional — only use a dedicated Ingress</span></pre>
+
+<table class="trace">
+  <tr><th>Field</th><th>Effect when set</th></tr>
+  <tr><td><code>http01.ingress.class</code></td><td>The challenge route is created as an Ingress of this class.</td></tr>
+  <tr><td><code>http01.ingress.name</code></td><td>All challenge routes land on <em>one</em> existing Ingress you control &mdash; useful when the cluster has only one public-facing Ingress and you don't want cert-manager to create new ones.</td></tr>
+  <tr><td><code>http01.gatewayHTTPRoute.parentRefs</code></td><td>Same idea, but for Gateway API (Envoy Gateway, Contour, etc.) instead of Ingress.</td></tr>
+</table>
+
+<p>If you don't set anything, cert-manager creates a new temporary
+Ingress for each challenge, named
+<code>cm-acme-http-solver-&lt;random&gt;</code>. That works, but it
+spams your Ingress list and assumes the default Ingress class is the
+one LE can reach.</p>
+
+<div class="callout warn">
+<strong>Two common HTTP-01 failures &mdash; and the fix.</strong>
+</div>
+
+<div class="compare">
+  <div class="col bad">
+    <h4>"self-check failed: … 404"</h4>
+    <p>The challenge route exists in the cluster but isn't reachable
+    from the test pod. Almost always a <strong>default Ingress class</strong>
+    problem &mdash; the cluster has a default class that's not the
+    public-facing one (or vice versa). Pin <code>class: nginx</code>
+    (or your class) explicitly.</p>
+  </div>
+  <div class="col bad">
+    <h4>"waiting for http-01 challenge propagation: …"</h4>
+    <p>The challenge route works internally but LE can't reach it from
+    the internet. The cause is almost always <strong>port 80 not
+    exposed</strong> (firewall, internal-only LB, the Ingress controller
+    on a NodePort that the LB doesn't forward). Switch to DNS-01
+    (lesson 3) if you can't open 80.</p>
+  </div>
+</div>
+
+<h2>What an unhealthy Challenge actually looks like</h2>
+
+<p>Reproduce, then read the events &mdash; in order:</p>
+
+<pre><span class="v">$ kubectl</span> get challenge -n default
+NAME                              STATE     AGE
+api-example-com-tls-1-xxxxxxx     pending   12s
+
+<span class="v">$ kubectl</span> describe challenge api-example-com-tls-1-xxxxxxx -n default
+...
+Events:
+  Type     Reason     Age   From                Message
+  ----     ------     ----  ----                -------
+  Normal   Started    14s   cert-manager        Challenge scheduled for processing
+  Normal   Presented  8s    cert-manager        Presented challenge using http-01
+  Warning  Failed     3s    cert-manager        Waiting for http-01 challenge
+                                                 propagation: …
+  Warning  Errored    2s    cert-manager        Error presenting challenge: …</pre>
+
+<p>Each line is a state transition. The interesting ones are
+<code>Presented</code> (the solver route is up) and the
+<code>Failed</code>/<code>Errored</code> line at the end (the actual
+cause). Reading those two alone tells you ~80% of HTTP-01 bugs.</p>
+
+<h2>The propagation delay is real</h2>
+
+<p>Even when everything is configured correctly, the challenge response
+can take 30-90 seconds to propagate through:</p>
+
+<ul>
+  <li>The new Ingress rule has to be picked up by the controller.</li>
+  <li>The LB has to update its routing table.</li>
+  <li>DNS caches have to expire if you're changing hostnames.</li>
+</ul>
+
+<p>cert-manager retries LE's challenge checks for a few minutes before
+giving up &mdash; usually long enough. But during the first issuance on
+a brand-new cluster, expect 60-120 seconds from
+<code>kubectl apply</code> to <code>Ready=True</code> on the
+Certificate.</p>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="a">
+  <p class="q">cert-manager's HTTP-01 solver creates a route that serves a token. Where is the route reachable <em>from</em> when the CA checks it?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="The CA verifies by hitting the URL from its own infrastructure, not from inside the cluster. The self-check is a separate, faster sanity check.">From the public internet (Let's Encrypt's own HTTP client)</button>
+    <button class="opt" data-value="b" data-why="That would be the self-check, not the actual CA check. The CA still has to reach the route from outside the cluster.">From the cert-manager pod, via a self-check only</button>
+    <button class="opt" data-value="c" data-why="The CA doesn't run in your cluster and can't reach internal service IPs.">From the kubelet on every node</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="b">
+  <p class="q">Your HTTP-01 challenge fails with "self-check failed: 404". The most likely cause is…</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="A missing account key causes "no ACME account" errors, not 404 on the self-check.">Your ACME account key is missing</button>
+    <button class="opt" data-value="b" data-why="The default Ingress class is the most common cause — cert-manager creates a route under one class, but the only public-facing controller is under a different one.">Wrong default Ingress class for the cluster</button>
+    <button class="opt" data-value="c" data-why="DNS-01 is the alternative to HTTP-01. The error message specifically mentions http-01.">You should switch to DNS-01 instead</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">What's the <em>self-check</em> in cert-manager's HTTP-01 solver?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="A lint step is unrelated to HTTP-01.">A lint pass that validates the Certificate spec</button>
+    <button class="opt" data-value="b" data-why="DNS resolution is a separate concern; HTTP-01 is HTTP-based.">A DNS resolution check for the domain</button>
+    <button class="opt" data-value="c" data-why="The self-check stands up the solver route and verifies it serves the correct token from inside the cluster, before LE even sees the challenge. It catches most config errors in seconds.">An internal reachability test that the solver route serves the right token, before Let's Encrypt is asked to verify</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="01-cert-manager-basics.html">← The model</a>
+    <a href="03-dns-01-and-wildcards.html">Next: DNS-01 & wildcards →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "how do I pin cert-manager to use a specific
+    Ingress controller when the cluster has two?" or "show me a
+    Cloudflare-frontend ACME issuer with HTTP-01".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>

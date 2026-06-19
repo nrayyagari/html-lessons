@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L4 · Private CAs — Kubernetes cert-manager</title>
+<link rel="stylesheet" href="./assets/main.css" />
+</head>
+<body>
+<main>
+
+<nav class="lesson-bar">
+  <a href="03-dns-01-and-wildcards.html">← DNS-01</a>
+  <a href="./index.html">Series</a>
+  <span class="here">Lesson 4 of 5</span>
+  <a href="05-renewals-and-operations.html">Next: Renewals & operations →</a>
+</nav>
+
+<header class="lesson-head">
+  <div class="num">Lesson 04 · Issuer types</div>
+  <h1>Private CAs: Vault, step-ca, self-signed</h1>
+  <p class="lede">Not every cert should come from Let's Encrypt. Internal
+  services, mTLS between pods, and offline clusters all want certs
+  signed by a CA you control. cert-manager supports several
+  private-CA issuer types &mdash; here's when to use which.</p>
+</header>
+
+<p>Let's Encrypt is great for certs the public internet has to trust.
+For everything else &mdash; internal services, mTLS between pods in a
+service mesh, certs for an offline cluster &mdash; you want a private
+CA. The trade-off:</p>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Public CA (Let's Encrypt)</h4>
+    <p>Trusted by browsers and OSes by default. Free. Per-domain rate
+    limits. Domain validation only &mdash; you can't get a cert for an
+    internal hostname like <code>postgres.default.svc</code>.</p>
+  </div>
+  <div class="col good">
+    <h4>Private CA (Vault, step-ca, …)</h4>
+    <p>Certs for any name &mdash; including internal ones. Unlimited
+    issuance. You must distribute the CA root to every client that
+    needs to trust the certs. Renewal is on you (or on cert-manager).</p>
+  </div>
+</div>
+
+<h2>The four issuer types you'll meet</h2>
+
+<table class="trace">
+  <tr><th>Issuer type</th><th>Best for</th><th>Trusts needed</th></tr>
+  <tr><td><code>selfSigned</code></td><td>bootstrapping, dev, ephemeral clusters</td><td>nothing &mdash; not trusted by anything</td></tr>
+  <tr><td><code>ca</code></td><td>internal CA you control (CFSSL, step-ca, openssl)</td><td>clients must trust the CA root</td></tr>
+  <tr><td><code>vault</code></td><td>HashiCorp Vault PKI engine in your infra</td><td>Vault auth + clients trust the CA</td></tr>
+  <tr><td><code>venafi</code></td><td>enterprise policy/compliance (TPP, Venafi Cloud)</td><td>Venafi policy</td></tr>
+</table>
+
+<p>All four use the same <code>Certificate</code> resource &mdash; only
+the <code>spec.issuerRef.kind</code> and the Issuer's <code>spec</code>
+block change.</p>
+
+<h2>Self-signed: for bootstrapping, not for browsers</h2>
+
+<p>Use it once, throw it away. Self-signed certs aren't trusted by
+anything; they're useful for the bootstrap problem
+("I need a cert to talk to the Vault API to get a real cert").</p>
+
+<pre><span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: Issuer
+<span class="k">metadata</span>:
+  <span class="k">name</span>: self-signed-bootstrap
+  <span class="k">namespace</span>: default
+<span class="k">spec</span>:
+  <span class="k">selfSigned</span>: {}</pre>
+
+<p>One thing self-signed <em>is</em> useful for: as the issuer for an
+intermediate CA Certificate. You sign a long-lived CA cert with
+self-signed, then use that CA to issue real certs. The "real" trust
+comes from distributing <em>that intermediate</em> to your clients, not
+from the self-signed root.</p>
+
+<h2>CA Issuer: the do-it-yourself option</h2>
+
+<p>You have a CA bundle (PEM-encoded cert + key). cert-manager uses it
+to sign <code>Certificate</code> requests locally, no network round
+trip, no rate limit. The tradeoff: you're responsible for the CA
+itself &mdash; secure storage, rotation, audit, the whole nine yards.</p>
+
+<pre><span class="c"># 1. the CA's private key & cert live in a Secret</span>
+<span class="k">apiVersion</span>: v1
+<span class="k">kind</span>: Secret
+<span class="k">metadata</span>:
+  <span class="k">name</span>: internal-ca-key
+  <span class="k">namespace</span>: cert-manager
+<span class="k">type</span>: Opaque
+<span class="k">data</span>:
+  <span class="k">tls.crt</span>: &lt;base64 PEM of CA cert&gt;
+  <span class="k">tls.key</span>: &lt;base64 PEM of CA key&gt;
+
+<span class="c"># 2. the Issuer points at the Secret</span>
+<span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: Issuer
+<span class="k">metadata</span>:
+  <span class="k">name</span>: internal-ca
+  <span class="k">namespace</span>: default
+<span class="k">spec</span>:
+  <span class="k">ca</span>:
+    <span class="k">secretName</span>: internal-ca-key</pre>
+
+<p>For most teams, this is the right "I want internal certs but I don't
+want to run a full PKI" option &mdash; especially if you already have
+a CA from your security team, or if you generate one with
+<code>step ca init</code> (see below).</p>
+
+<h2>step-ca: small, friendly, well-loved</h2>
+
+<p><a href="https://smallstep.com/docs/step-ca">step-ca</a> is a
+lightweight private CA from the makers of
+<code>step</code>. The <code>ca</code> Issuer type talks to it over
+HTTP. Setup is two commands:</p>
+
+<pre><span class="c"># 1. initialize a CA on a small VM (or in-cluster, but a VM is the usual home)</span>
+step ca init --name "Internal CA" --dns "ca.internal.example.com" \
+            --address ":443" --provisioner "admin"
+
+<span class="c"># 2. point cert-manager at it</span>
+<span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: Issuer
+<span class="k">metadata</span>:
+  <span class="k">name</span>: step-ca
+  <span class="k">namespace</span>: default
+<span class="k">spec</span>:
+  <span class="k">ca</span>:
+    <span class="k">url</span>: https://ca.internal.example.com
+    <span class="k">cABundle</span>: &lt;base64 PEM of the step-ca root&gt;
+    <span class="k">privateKeySecretRef</span>:
+      <span class="k">name</span>: step-ca-key
+    <span class="k">maxRetryDuration</span>: 30s</pre>
+
+<p>step-ca's killer feature is the JWK provisioner model &mdash; you
+issue certs with short-lived tokens instead of long-lived CA keys. The
+CA private key never leaves the step-ca server. Combined with cert-manager
+renewing at, say, 7 days, you get very tight blast radius if any one
+cert or token is compromised.</p>
+
+<h2>Vault Issuer: when Vault is already the source of truth</h2>
+
+<p>If you already run HashiCorp Vault and have its PKI secrets engine
+configured, the Vault Issuer type just calls Vault to sign. Auth is
+via a Kubernetes service-account JWT bound to a Vault role.</p>
+
+<pre><span class="k">apiVersion</span>: cert-manager.io/v1
+<span class="k">kind</span>: Issuer
+<span class="k">metadata</span>:
+  <span class="k">name</span>: vault-pki
+  <span class="k">namespace</span>: default
+<span class="k">spec</span>:
+  <span class="k">vault</span>:
+    <span class="k">server</span>: https://vault.internal.example.com
+    <span class="k">path</span>: pki_internal/sign/example-com
+    <span class="k">auth</span>:
+      <span class="k">kubernetes</span>:
+        <span class="k">role</span>: cert-manager
+        <span class="k">serviceAccountRef</span>:
+          <span class="k">name</span>: cert-manager
+        <span class="k">path</span>: auth/kubernetes/login</pre>
+
+<p>Vault gives you policy control over which certs can be issued for
+which names, audit logs of every issuance, and easy revocation via
+Vault's PKI engine. For regulated environments, this is the natural
+choice.</p>
+
+<h2>Distributing the CA root to clients</h2>
+
+<p>Private CAs aren't trusted by default &mdash; the OS / browser /
+language runtime doesn't know about your CA. You have to
+distribute the root. Two patterns:</p>
+
+<div class="compare">
+  <div class="col good">
+    <h4>Inject into a sidecar / init container</h4>
+    <p>For service-mesh mTLS, the sidecar (Istio, Linkerd) already
+    ships with a CA bundle &mdash; configure it to trust yours. The
+    application code never has to know.</p>
+  </div>
+  <div class="col good">
+    <h4>Mount as a configmap on the pod</h4>
+    <p>For HTTPS calls between services, mount the CA cert into
+    <code>/etc/ssl/certs/</code> via a ConfigMap and point your HTTP
+    client at the path. Most libraries support
+    <code>SSL_CERT_FILE</code> automatically.</p>
+  </div>
+</div>
+
+<div class="callout warn">
+<strong>The forgotten step.</strong> Most "cert-manager isn't working"
+stories end with someone realizing they issued a cert correctly, but
+the client doesn't trust the issuing CA. <code>curl -v</code> the
+endpoint and look for <code>self signed certificate in certificate
+chain</code> &mdash; that's the smoking gun.
+</div>
+
+<h2>Quiz</h2>
+
+<div class="quiz" data-answer="b">
+  <p class="q">You need a cert for <code>postgres.default.svc.cluster.local</code> &mdash; an internal-only service. Which issuer type is the right fit?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="LE only validates public domains you can prove control of via HTTP-01 or DNS-01. Internal cluster hostnames aren't reachable from the public internet.">ACME (Let's Encrypt) with HTTP-01</button>
+    <button class="opt" data-value="b" data-why="A private CA can sign for any name, including internal ones. ACME cannot, because the names aren't reachable from outside the cluster.">ca, vault, or step-ca — any private CA</button>
+    <button class="opt" data-value="c" data-why="Self-signed works for this technically, but the cert wouldn't be trusted by anything that doesn't have a special exception. Not the right default for shared internal services.">selfSigned (with a self-signed Issuer)</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="c">
+  <p class="q">Your service-mesh sidecar returns "x509: certificate signed by unknown authority" when talking to a peer service. The peer has a cert from your Vault PKI. What's the most likely cause?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Vault and cert-manager both worked correctly. The issue is on the trust side: the sidecar's CA bundle doesn't include your Vault root.">The Vault PKI engine is misconfigured</button>
+    <button class="opt" data-value="b" data-why="Cert validation fails before a TLS handshake completes. mTLS is the consequence of the trust gap, not the cause of it.">The sidecar is doing mTLS and that's known to fail</button>
+    <button class="opt" data-value="c" data-why="Private CA roots aren't in the OS / sidecar's default trust store. The cert was issued correctly; the sidecar just doesn't know to trust the issuer. Add the Vault root to the sidecar's CA bundle.">The sidecar's CA bundle doesn't include your Vault root cert</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<div class="quiz" data-answer="a">
+  <p class="q">Why is <code>selfSigned</code> rarely used as the final issuer, but commonly used as the issuer for an intermediate CA Certificate?</p>
+  <div class="opts">
+    <button class="opt" data-value="a" data-why="Self-signed certs aren't trusted by anything, so they make poor leaf certs. But they're fine as the root of a chain you control — clients trust the *intermediate* you hand out, not the self-signed root.">Self-signed certs aren't trusted by clients, so they're useless as leaf certs — but they work fine as the root of a private chain</button>
+    <button class="opt" data-value="b" data-why="Self-signed is actually faster than CA — the controller doesn't need to contact anything.">Self-signed issuance is slow</button>
+    <button class="opt" data-value="c" data-why="There's no such constraint; self-signed is a perfectly valid issuer type. The real reason is purely about trust.">cert-manager doesn't allow self-signed for intermediate CAs</button>
+  </div>
+  <p class="fb"></p>
+</div>
+
+<footer class="lesson-foot">
+  <div class="row">
+    <a href="03-dns-01-and-wildcards.html">← DNS-01</a>
+    <a href="05-renewals-and-operations.html">Next: Renewals & operations →</a>
+    <a href="cheatsheet.md">↑ Cheat sheet</a>
+  </div>
+  <div class="ask">
+    <strong>Stuck?</strong> Ask: "how do I bootstrap a step-ca inside the
+    cluster?", or "show me a service-mesh mTLS example with cert-manager
+    + Vault".
+  </div>
+</footer>
+
+</main>
+<script src="./assets/quiz.js"></script>
+</body>
+</html>
